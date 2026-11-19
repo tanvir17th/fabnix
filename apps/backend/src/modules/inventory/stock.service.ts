@@ -23,6 +23,8 @@ export interface MovementInput {
   deltaReserved?: DecimalInput;
   /** Cost per inch for inbound movements (opening/purchase) — updates moving average. */
   unitCostPerInch?: DecimalInput;
+  /** For reversals of inbound movements (purchase cancel): take this cost back OUT of the average. */
+  removeCostPerInch?: DecimalInput;
   saleItemId?: string;
   orderItemId?: string;
   reservationId?: string;
@@ -122,6 +124,11 @@ export class StockService {
       const cost = D(m.unitCostPerInch);
       const base = Decimal.max(stock.onHand, ZERO);
       avg = base.plus(dOn).isZero() ? cost : base.times(avg).plus(dOn.times(cost)).div(base.plus(dOn)).toDecimalPlaces(6);
+    } else if (m.removeCostPerInch !== undefined && dOn.isNegative()) {
+      const remaining = stock.onHand.plus(dOn);
+      if (remaining.greaterThan(0)) {
+        avg = Decimal.max(stock.onHand.times(avg).plus(dOn.times(D(m.removeCostPerInch))).div(remaining), ZERO).toDecimalPlaces(6);
+      }
     }
 
     await tx.$executeRaw`

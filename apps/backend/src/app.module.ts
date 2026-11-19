@@ -5,6 +5,7 @@ import { APP_CONFIG, AppConfig } from './config/app-config';
 import { ConfigModule } from './config/config.module';
 import { CommonModule } from './common/common.module';
 import { AuthGuard } from './common/auth/auth.guard';
+import { AUTH_THROTTLE } from './common/auth/auth.decorators';
 import { AuthController } from './modules/auth/auth.controller';
 import { AuthService } from './modules/auth/auth.service';
 import { UsersController } from './modules/users/users.controller';
@@ -25,7 +26,11 @@ import { SalesController } from './modules/sales/sales.controller';
 import { SalesService } from './modules/sales/sales.service';
 import { StorefrontController } from './modules/storefront/storefront.controller';
 import { StorefrontService } from './modules/storefront/storefront.service';
-import { PublicCatalogController } from './modules/storefront/public-catalog.controller';
+import { PublicCatalogController, PublicShopsController } from './modules/storefront/public-catalog.controller';
+import { PurchasingController } from './modules/purchasing/purchasing.controller';
+import { PurchasingService } from './modules/purchasing/purchasing.service';
+import { ReportsController } from './modules/reports/reports.controller';
+import { ReportsService } from './modules/reports/reports.service';
 import { PublicCatalogService } from './modules/storefront/public-catalog.service';
 import { CartService } from './modules/orders/cart.service';
 import { CustomerOrdersController, ShopOrdersController } from './modules/orders/orders.controller';
@@ -46,7 +51,14 @@ import { HealthController } from './health.controller';
       imports: [ConfigModule],
       inject: [APP_CONFIG],
       useFactory: (config: AppConfig) => ({
-        throttlers: [{ name: 'default', ttl: 60_000, limit: config.throttle.defaultLimit }],
+        // One counter per route + client IP. Auth-sensitive routes get the strict limit.
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60_000,
+            limit: (ctx) => (Reflect.getMetadata(AUTH_THROTTLE, ctx.getHandler()) ? config.throttle.authLimit : config.throttle.defaultLimit),
+          },
+        ],
         skipIf: () => config.nodeEnv === 'test',
       }),
     }),
@@ -63,7 +75,10 @@ import { HealthController } from './health.controller';
     CustomersController,
     SalesController,
     StorefrontController,
+    PublicShopsController,
     PublicCatalogController,
+    PurchasingController,
+    ReportsController,
     CustomerOrdersController,
     ShopOrdersController,
     AdminController,
@@ -85,6 +100,8 @@ import { HealthController } from './health.controller';
     CartService,
     OrdersService,
     ReservationSweeper,
+    PurchasingService,
+    ReportsService,
   ],
 })
 export class AppModule {}

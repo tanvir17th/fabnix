@@ -6,6 +6,19 @@ import { Public } from '../../common/auth/auth.decorators';
 import { ZBody, ZQuery } from '../../common/validation/zod';
 import { PublicCatalogService } from './public-catalog.service';
 
+/** Shop discovery across published storefronts (§A7 "Discover Shops"). */
+@ApiTags('public storefront')
+@Public()
+@Controller('public/shops')
+export class PublicShopsController {
+  constructor(private readonly catalog: PublicCatalogService) {}
+
+  @Get()
+  list(@ZQuery(schemas.publicShopListQuery) q: z.infer<typeof schemas.publicShopListQuery>) {
+    return this.catalog.discover(q);
+  }
+}
+
 /** Unauthenticated storefront API: fabnix.com/shop/<slug> (FR-088, FR-096, FR-097). */
 @ApiTags('public storefront')
 @Public()

@@ -48,6 +48,38 @@ export class PublicCatalogService {
     return s;
   }
 
+  async discover(q: z.infer<typeof schemas.publicShopListQuery>) {
+    const where: Prisma.StorefrontWhereInput = {
+      isEnabled: true,
+      adminSuspended: false,
+      status: { in: ['PUBLISHED', 'PAUSED'] },
+      shop: { status: 'ACTIVE' },
+      ...(q.q ? { OR: [{ slug: { contains: q.q.toLowerCase() } }, { displayName: { contains: q.q, mode: 'insensitive' } }, { tagline: { contains: q.q, mode: 'insensitive' } }, { addressLine: { contains: q.q, mode: 'insensitive' } }] } : {}),
+    };
+    const rows = await this.prisma.storefront.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      take: q.limit + 1,
+      ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
+      select: { id: true, slug: true, displayName: true, tagline: true, logoKey: true, bannerKey: true, addressLine: true, status: true, shopId: true },
+    });
+    const page = rows.slice(0, q.limit);
+    const counts = await this.prisma.product.groupBy({ by: ['shopId'], where: { shopId: { in: page.map((r) => r.shopId) }, status: 'ACTIVE', isPublishedOnline: true, moderationStatus: 'VISIBLE' }, _count: { _all: true } });
+    return {
+      items: page.map((r) => ({
+        slug: r.slug,
+        displayName: r.displayName,
+        tagline: r.tagline,
+        address: r.addressLine,
+        status: r.status,
+        logoUrl: this.storage.publicUrl(r.logoKey),
+        bannerUrl: this.storage.publicUrl(r.bannerKey),
+        productCount: counts.find((c) => c.shopId === r.shopId)?._count._all ?? 0,
+      })),
+      nextCursor: rows.length > q.limit ? page[page.length - 1]!.id : null,
+    };
+  }
+
   async store(slug: string) {
     const s = await this.visibleStore(slug);
     const sf = s.storefront;

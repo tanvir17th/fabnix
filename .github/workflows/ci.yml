@@ -16,6 +16,7 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     steps:
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-16
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
@@ -27,3 +28,10 @@ jobs:
       - run: npm run test:shared -- --coverage
       - run: npm run test -w @fabnix/backend
       - run: npm run build -w @fabnix/backend
+      - run: npm run test -w @fabnix/web        # i18n parity + coverage of every server code
+      - run: npm run build -w @fabnix/web
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npm run test:e2e -w @fabnix/web
+        env:
+          PG_BIN: /usr/lib/postgresql/16/bin

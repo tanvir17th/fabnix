@@ -66,7 +66,7 @@ export class UnitsService {
   list(shopId: string, includeInactive = false) {
     return this.prisma.measurementUnit.findMany({
       where: { shopId, ...(includeInactive ? {} : { isActive: true }) },
-      orderBy: [{ code: 'asc' }, { version: 'desc' }],
+      orderBy: [{ sortOrder: 'asc' }, { code: 'asc' }, { version: 'desc' }],
     });
   }
 

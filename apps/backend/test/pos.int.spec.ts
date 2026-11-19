@@ -193,3 +193,17 @@ describe('measurement & POS sales', () => {
     expect(inv.body).toMatchObject({ language: 'en', shop: { name: 'ABC Fabrics' }, lines: [expect.objectContaining({ measurementDisplay: '5 yd 4 gira', quantity: '5.2500', lineTotal: '1050' })] });
   });
 });
+
+describe('BR-014: timestamps are stored in UTC regardless of server timezone', () => {
+  it('a row written now reads back within seconds of real UTC time', async () => {
+    const t = await createTestApp();
+    try {
+      const [row] = await t.prisma.$queryRaw<Array<{ tz: string }>>`SELECT current_setting('TimeZone') AS tz`;
+      expect(row!.tz).toBe('UTC');
+      const p = await t.prisma.permission.findFirstOrThrow();
+      expect(Math.abs(p.createdAt.getTime() - Date.now())).toBeLessThan(10 * 60_000);
+    } finally {
+      await t.close();
+    }
+  });
+});

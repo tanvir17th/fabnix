@@ -7,6 +7,15 @@ export type Tx = Prisma.TransactionClient;
 /** Either the root client or an interactive transaction client. */
 export type Db = PrismaService | Tx;
 
+/**
+ * Every connection runs with TimeZone=UTC (BR-014). Without this, the pg driver
+ * adapter's offset-less timestamp parameters are interpreted in the server's
+ * session timezone and stored shifted (caught by tests on an Asia/Dhaka cluster).
+ */
+export function pgPoolConfig(connectionString: string, max?: number) {
+  return { connectionString, max, options: '-c TimeZone=UTC' };
+}
+
 const RETRYABLE_PG_CODES = new Set(['40001', '40P01']);
 
 export function isRetryableTxError(e: unknown): boolean {
@@ -26,7 +35,7 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
   private readonly logger = new Logger(PrismaService.name);
 
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    super({ adapter: new PrismaPg({ connectionString: config.databaseUrl, max: config.dbPoolMax }) });
+    super({ adapter: new PrismaPg(pgPoolConfig(config.databaseUrl, config.dbPoolMax)) });
   }
 
   async onModuleDestroy(): Promise<void> {

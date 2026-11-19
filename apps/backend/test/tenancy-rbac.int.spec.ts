@@ -116,6 +116,14 @@ describe('tenant isolation & RBAC', () => {
       }
     });
 
+    it('GET /shops/:id/me reports effective permissions for the UI', async () => {
+      const me = await t.api.as(cashier.token).get(`/shops/${A.shopId}/me`);
+      expect(me.body).toMatchObject({ isOwner: false, role: { presetKey: 'cashier' }, pos: { currencyPrecision: 2, taxMode: 'NONE' } });
+      expect(me.body.permissions).toContain('pos.sale.create');
+      expect(me.body.permissions).not.toContain('catalog.manage');
+      expect((await t.api.as(A.token).get(`/shops/${A.shopId}/me`)).body.permissions).toContain('subscription.manage');
+    });
+
     it('sales.view_own: cashier sees only their own sales', async () => {
       const list = await t.api.as(cashier.token).get(`/shops/${A.shopId}/sales`);
       expect(list.body.items.length).toBe(1);

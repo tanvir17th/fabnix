@@ -8,6 +8,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { hash, Algorithm } from '@node-rs/argon2';
 import { ALL_PLATFORM_PERMISSIONS, ALL_SHOP_PERMISSIONS, SENSITIVE_PERMISSIONS, permissionLabelKey } from '@fabnix/shared';
 import { PrismaClient } from '../generated/prisma/client';
+import { pgPoolConfig } from '../common/prisma/prisma.service';
 import { DEFAULT_PLANS } from '../common/bootstrap/catalog-bootstrap.service';
 
 async function main() {
@@ -17,7 +18,7 @@ async function main() {
   const password = process.env.SEED_ADMIN_PASSWORD;
   if (!password || password.length < 12) throw new Error('SEED_ADMIN_PASSWORD (≥12 chars) is required');
 
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+  const prisma = new PrismaClient({ adapter: new PrismaPg(pgPoolConfig(url)) });
   try {
     await prisma.permission.createMany({
       data: [

@@ -9,3 +9,6 @@ apps/backend/storage/
 .tmp/
 *.log
 .DS_Store
+apps/web/.next/
+apps/web/test-results/
+apps/web/playwright-report/

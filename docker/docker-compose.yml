@@ -1,5 +1,5 @@
 # Local stack: docker compose -f docker/docker-compose.yml up --build
-# The web app service is added in Milestone 3.
+# Open http://localhost:3000 (web proxies /api/v1 and /media to the backend).
 name: fabnix
 services:
   postgres:
@@ -52,6 +52,7 @@ services:
       JWT_ACCESS_SECRET: local-dev-only-secret-change-me-0123456789abcdef
       COOKIE_SECURE: "false"
       CORS_ORIGINS: http://localhost:3000
+      TRUST_PROXY: "true"
       AUTH_REQUIRE_VERIFICATION: "true"
       STORAGE_DRIVER: s3
       S3_ENDPOINT: http://minio:9000
@@ -63,6 +64,11 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       minio-init: { condition: service_completed_successfully }
+
+  web:
+    build: { context: .., dockerfile: docker/Dockerfile.web, args: { API_URL: http://backend:4000 } }
+    ports: ["3000:3000"]
+    depends_on: [backend]
 
 volumes:
   pgdata:

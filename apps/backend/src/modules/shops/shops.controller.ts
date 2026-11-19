@@ -25,6 +25,16 @@ export class ShopsController {
     return this.shops.get(ctx.shopId);
   }
 
+  /**
+   * The caller's effective access in this shop + POS pricing policy. Used by the
+   * UI to shape navigation; the server still enforces every permission (BR-012).
+   */
+  @Get(':shopId/me')
+  @ShopRoute()
+  me(@Shop() ctx: ShopContext) {
+    return this.shops.myAccess(ctx);
+  }
+
   @Patch(':shopId')
   @ShopRoute(P.SHOP_SETTINGS_MANAGE)
   update(@Shop() ctx: ShopContext, @ZBody(schemas.updateShopSchema) dto: z.infer<typeof schemas.updateShopSchema>) {

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomInt } from 'node:crypto';
-import { ROLE_PRESETS, STANDARD_UNITS, schemas } from '@fabnix/shared';
+import { ALL_SHOP_PERMISSIONS, ROLE_PRESETS, STANDARD_UNITS, schemas } from '@fabnix/shared';
 import { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
 import { AuditService } from '../../common/audit/audit.service';
@@ -59,7 +59,9 @@ export class ShopsService {
           currencyPrecision: dto.currency === 'BDT' ? 2 : 2,
         },
       });
-      await tx.branch.create({ data: { shopId: created.id, name: 'Main Branch', code: 'MAIN', isDefault: true } });
+      // Default records are shop content, created in the shop's chosen language.
+      const bn = dto.defaultLanguage === 'bn';
+      await tx.branch.create({ data: { shopId: created.id, name: bn ? 'প্রধান শাখা' : 'Main Branch', code: 'MAIN', isDefault: true } });
 
       let ownerRoleId = '';
       for (const preset of ROLE_PRESETS) {
@@ -90,8 +92,8 @@ export class ShopsService {
 
       await tx.shopPaymentMethod.createMany({
         data: [
-          { shopId: created.id, type: 'CASH', label: 'Cash', availableInPos: true, availableOnline: false, sortOrder: 0 },
-          { shopId: created.id, type: 'CASH_ON_DELIVERY', label: 'Cash on Delivery', availableInPos: false, availableOnline: true, sortOrder: 1 },
+          { shopId: created.id, type: 'CASH', label: bn ? 'নগদ' : 'Cash', availableInPos: true, availableOnline: false, sortOrder: 0 },
+          { shopId: created.id, type: 'CASH_ON_DELIVERY', label: bn ? 'ক্যাশ অন ডেলিভারি' : 'Cash on Delivery', availableInPos: false, availableOnline: true, sortOrder: 1 },
         ],
       });
 
@@ -120,6 +122,35 @@ export class ShopsService {
     });
     if (!shop) throw notFound('shop');
     return shop;
+  }
+
+  async myAccess(ctx: ShopContext) {
+    const [shop, s, member] = await Promise.all([
+      this.prisma.shop.findUniqueOrThrow({ where: { id: ctx.shopId }, select: { id: true, name: true, code: true, status: true, currency: true, timezone: true, logoKey: true } }),
+      this.prisma.shopSettings.findUniqueOrThrow({ where: { shopId: ctx.shopId } }),
+      this.prisma.shopMember.findUniqueOrThrow({ where: { id: ctx.memberId }, include: { role: { select: { name: true, presetKey: true } } } }),
+    ]);
+    return {
+      shop,
+      role: member.role,
+      isOwner: ctx.isOwner,
+      permissions: ctx.isOwner ? ALL_SHOP_PERMISSIONS : [...ctx.permissions],
+      allBranches: ctx.allBranches,
+      branchIds: [...ctx.branchIds],
+      pos: {
+        currencyPrecision: s.currencyPrecision,
+        roundingMode: s.roundingMode,
+        taxMode: s.taxMode,
+        defaultTaxRate: s.defaultTaxRate.toString(),
+        cashRounding: s.cashRounding,
+        defaultDisplayUnitCode: s.defaultDisplayUnitCode,
+        lengthDisplayPrecision: s.lengthDisplayPrecision,
+        numberLocale: s.numberLocale,
+        defaultInvoiceLanguage: s.defaultInvoiceLanguage,
+        allowPartialPayment: s.allowPartialPayment,
+        allowDueSales: s.allowDueSales,
+      },
+    };
   }
 
   async update(ctx: ShopContext, dto: z.infer<typeof schemas.updateShopSchema>) {

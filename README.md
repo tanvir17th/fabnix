@@ -9,7 +9,8 @@ The design and its trade-offs are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md
 ```
 packages/shared   Decimal-safe measurement & pricing engine, Zod schemas, permissions, order state machine
 apps/backend      NestJS 11 API (/api/v1) + Prisma 7 / PostgreSQL
-docker/           Dockerfile + local compose stack (Postgres, Redis, MinIO, API)
+apps/web          Next.js 15 bilingual (bn/en) web app: storefront & customer portal, shopkeeper workspace, admin console
+docker/           Dockerfiles + local compose stack (Postgres, Redis, MinIO, API, web)
 ```
 
 ## Prerequisites
@@ -28,7 +29,15 @@ cp apps/backend/.env.example apps/backend/.env  # then set DATABASE_URL and JWT_
 npm run db:migrate                              # applies schema + constraints.sql guards
 SEED_ADMIN_PASSWORD='choose-a-long-one' npm run db:seed
 npm run dev:backend                             # http://localhost:4000/api/v1  · docs at /api/docs
+npm run dev:web                                 # http://localhost:3000 (proxies /api/v1 and /media to the API)
 ```
+
+The web app is served at three entry points:
+- **Customers:** `/bn` and `/shop/<slug>`.
+- **Shops:** `/bn/business`.
+- **Platform:** `/bn/admin`. Log in with the seeded Super Admin.
+
+Set `API_URL` (default `http://localhost:4000`) **before** `next build`, because the proxy target is fixed at build time.
 
 With Docker: `docker compose -f docker/docker-compose.yml up --build`.
 
@@ -38,7 +47,8 @@ With Docker: `docker compose -f docker/docker-compose.yml up --build`.
 ## Tests
 
 ```bash
-npm test                    # shared unit tests + backend unit and integration tests
+npm test                    # shared + backend (unit & integration) + web i18n guard
+npm run test:e2e            # Playwright: real Postgres + API + Next, Chromium journeys (bn & en)
 npm run test:shared -- --coverage
 npm run test:integration    # backend integration tests only
 ```
@@ -48,6 +58,8 @@ Integration tests run against a **real PostgreSQL**:
 - Otherwise the global setup starts a throwaway local cluster with `initdb` and `pg_ctl`. It finds the binaries through `PG_BIN`, `pg_config` or the Homebrew paths.
 
 The setup migrates one template database, and each test file then clones it, so test files run in parallel and stay isolated.
+
+For E2E, run `npx playwright install chromium` once. The harness then starts a throwaway Postgres, the compiled API and `next start`, and seeds a Super Admin.
 
 ## Conventions
 

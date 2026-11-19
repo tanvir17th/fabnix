@@ -1,17 +1,15 @@
 import { Controller, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
 import type { CookieOptions, Request, Response } from 'express';
 import { ErrorCode, schemas } from '@fabnix/shared';
 import { z } from 'zod';
 import { APP_CONFIG, AppConfig } from '../../config/app-config';
-import { CurrentUser, Public, AuthUser } from '../../common/auth/auth.decorators';
+import { AuthThrottle, CurrentUser, Public, AuthUser } from '../../common/auth/auth.decorators';
 import { AppError } from '../../common/errors/app-error';
 import { ZBody } from '../../common/validation/zod';
 import { AuthService, SessionTokens } from './auth.service';
 
 export const REFRESH_COOKIE = 'fabnix_rt';
-const AUTH_THROTTLE = { default: { limit: 10, ttl: 60_000 } };
 
 /**
  * Web clients receive the refresh token ONLY as an httpOnly cookie. Native
@@ -27,14 +25,14 @@ export class AuthController {
   ) {}
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
+  @AuthThrottle()
   @Post('register')
   async register(@ZBody(schemas.registerSchema) dto: z.infer<typeof schemas.registerSchema>) {
     return this.auth.register(dto);
   }
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
+  @AuthThrottle()
   @Post('verification/request')
   @HttpCode(202)
   async requestVerification(@ZBody(schemas.requestCodeSchema) dto: z.infer<typeof schemas.requestCodeSchema>) {
@@ -43,7 +41,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
+  @AuthThrottle()
   @Post('verification/confirm')
   @HttpCode(200)
   async verify(@ZBody(schemas.verifyContactSchema) dto: z.infer<typeof schemas.verifyContactSchema>) {
@@ -52,7 +50,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
+  @AuthThrottle()
   @Post('login')
   @HttpCode(200)
   async login(@ZBody(schemas.loginSchema) dto: z.infer<typeof schemas.loginSchema>, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
@@ -61,7 +59,6 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
   @Post('refresh')
   @HttpCode(200)
   async refresh(@ZBody(schemas.refreshSchema) dto: z.infer<typeof schemas.refreshSchema>, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
@@ -92,7 +89,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
+  @AuthThrottle()
   @Post('password/forgot')
   @HttpCode(202)
   async forgot(@ZBody(schemas.requestCodeSchema) dto: z.infer<typeof schemas.requestCodeSchema>) {
@@ -101,7 +98,7 @@ export class AuthController {
   }
 
   @Public()
-  @Throttle(AUTH_THROTTLE)
+  @AuthThrottle()
   @Post('password/reset')
   @HttpCode(200)
   async reset(@ZBody(schemas.resetPasswordSchema) dto: z.infer<typeof schemas.resetPasswordSchema>) {

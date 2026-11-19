@@ -1,7 +1,60 @@
 # FABNIX — Architecture Plan
 
 Baseline: *FABNIX SRS v1.1* (v1.1 amendment overrides v1.0 wherever they conflict).
-Status: Milestone 1 approved; **Milestone 2 (shared domain engine + backend core) implemented.**
+Status: Milestones 1–2 approved; **Milestone 3 (bilingual Next.js web app) implemented.**
+
+## 0a. Milestone 3 notes — web app
+
+**Stack:** Next.js **15.5** (App Router), React 19, next-intl 4, Tailwind CSS 4.
+
+- **Next.js 16 is not used yet.** It renames `middleware`, changes some defaults, and hasn't been validated here.
+- **Same-origin API.** The web app rewrites `/api/v1/*` and `/media/*` to the backend.
+  - This lets the httpOnly refresh cookie (`Path=/api/v1/auth`, `SameSite=Lax`) work without CORS.
+  - The access token lives only in memory.
+  - `API_URL` is baked into the rewrites at **build** time.
+- **Three experiences** (§A7), each guarded client-side by user type; the API enforces everything.
+  - `/[locale]/…` — public storefront and customer portal.
+  - `/[locale]/business/[shopId]/…` — shopkeeper workspace. Navigation follows `GET /shops/:id/me` permissions.
+  - `/[locale]/admin/…` — Super Admin console.
+- **Bilingual.**
+  - URLs are locale-prefixed (`/bn`, `/en`; Bangla is the default) with an accessible switcher.
+  - Each user's saved language is applied at login and on session restore (AC-001, NFR-L10N-002).
+  - Invoices carry their own language, independent of the UI.
+  - Measurements are rendered from stored components in the reader's language.
+  - `npm run test -w @fabnix/web` fails the build if:
+    - bn/en keys diverge;
+    - a static `t('key')` is missing;
+    - any API error code, permission, status or stock-movement type is untranslated.
+- **Calculation.**
+  - The POS and the storefront compute previews in the browser with `@fabnix/shared`, the same engine the server uses.
+  - The server recomputes and is authoritative. Checkout sends `expectedTotal` and handles `CART_CHANGED`.
+- **New backend endpoints for the UI:**
+  - Public shop discovery.
+  - Suppliers and purchases, with landed cost and reversal.
+  - Expenses.
+  - Reports: dashboard, sales (with CSV export), expenses, and a profit estimate that states its calculation basis.
+  - Shop audit search.
+  - `GET /shops/:id/me`.
+  - Admin: stats, users, plans, subscriptions, listing moderation and audit search.
+
+**Bugs found by the new tests and fixed:**
+- **Timestamps stored 6 hours early.** On a Postgres server whose timezone isn't UTC (the test cluster runs in Asia/Dhaka), the Prisma pg adapter stored timestamps shifted by the offset. Every connection now forces `TimeZone=UTC` (BR-014), and there's a regression test.
+- **Inflated cost of goods sold.** Reversing a purchase left its cost inside the moving average. The reversal now removes that cost.
+- **Shared rate limit behind the proxy.** The auth rate limit was per IP, and every user arrived through the Next proxy with the same IP; it also applied to `/auth/refresh`. Now:
+  - only brute-forceable endpoints get the strict limit;
+  - refresh is exempt;
+  - `TRUST_PROXY` makes limits use the real client IP.
+- **Login/language race.** After login, the login redirect and the language switch raced each other. Login now navigates once, directly in the user's language.
+
+**Not in Milestone 3:**
+- Server-rendered invoice PDF. Print/PDF uses the browser's print stylesheet; Chromium rendering for emailed PDFs comes later.
+- Shop logo and banner upload.
+- Branch transfer UI.
+- Returns and refund UI. The backend workflow is pending.
+- Email/SMS/push delivery.
+- Native mobile app (Phase 3).
+
+## 0. Implementation notes (Milestone 2) — where the code differs from this plan
 
 ## 0. Implementation notes (Milestone 2) — where the code differs from this plan
 
@@ -19,7 +72,7 @@ Deferred out of Milestone 2 (the schema for each is ready):
 - Gateway payment adapters and webhooks (FR-126; the tables exist)
 - Delivery-zone pricing (`ZONE` options are rejected at checkout)
 - Returns workflow
-- Purchases, suppliers and expenses APIs
+- ~~Purchases, suppliers and expenses APIs~~ (done in Milestone 3)
 - Invoice **PDF** rendering. The invoice view-model endpoint exists; PDF needs the web/Chromium renderer.
 - Guest checkout
 - 2FA

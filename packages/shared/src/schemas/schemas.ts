@@ -483,3 +483,135 @@ export type CreateSaleInput = z.infer<typeof createSaleSchema>;
 export type CheckoutInput = z.infer<typeof checkoutSchema>;
 export type CreateProductInput = z.infer<typeof createProductSchema>;
 export type MeasurementInput = z.infer<typeof measurementInput>;
+
+// ---------------------------------------------------------------------------
+// Suppliers, purchases, expenses (FR-054…FR-062)
+// ---------------------------------------------------------------------------
+
+export const supplierSchema = z.object({
+  name: z.string().trim().min(1).max(150),
+  contactPerson: z.string().trim().max(150).optional(),
+  phone: phoneSchema.optional(),
+  email: emailSchema.optional(),
+  addressLine: z.string().trim().max(300).optional(),
+  notes: z.string().max(2000).optional(),
+});
+export const updateSupplierSchema = supplierSchema.partial().extend({ status: z.enum(['ACTIVE', 'ARCHIVED']).optional() });
+
+export const purchaseLineSchema = z.object({
+  productId: uuid,
+  measurement: measurementInput,
+  /** Cost per the product's price unit (e.g. per yard). */
+  unitCost: decimalString(4, { allowZero: true }),
+});
+
+export const createPurchaseSchema = z.object({
+  branchId: uuid,
+  supplierId: uuid,
+  purchaseDate: z.iso.date(),
+  supplierInvoiceRef: z.string().trim().max(60).optional(),
+  items: z.array(purchaseLineSchema).min(1).max(100),
+  discountAmount: moneyOrZero.default('0'),
+  otherCharges: moneyOrZero.default('0'),
+  payments: z.array(z.object({ paymentMethodId: uuid, amount: money, reference: z.string().max(100).optional() })).max(5).default([]),
+  notes: z.string().max(1000).optional(),
+});
+
+export const supplierPaymentSchema = z.object({
+  paymentMethodId: uuid,
+  amount: money,
+  reference: z.string().trim().max(100).optional(),
+  note: z.string().max(300).optional(),
+});
+
+export const purchaseListQuery = paginationQuery.extend({
+  supplierId: uuid.optional(),
+  status: z.enum(['DRAFT', 'POSTED', 'CANCELLED']).optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+});
+
+export const expenseCategorySchema = z.object({ name: z.string().trim().min(1).max(80) });
+
+export const expenseSchema = z.object({
+  categoryId: uuid,
+  branchId: uuid.optional(),
+  paymentMethodId: uuid.optional(),
+  amount: money,
+  expenseDate: z.iso.date(),
+  note: z.string().max(1000).optional(),
+});
+
+export const expenseListQuery = paginationQuery.extend({
+  categoryId: uuid.optional(),
+  from: z.iso.date().optional(),
+  to: z.iso.date().optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Reports & audit (FR-066…FR-070, FR-084)
+// ---------------------------------------------------------------------------
+
+export const reportRangeQuery = z.object({
+  from: z.iso.date(),
+  to: z.iso.date(),
+  branchId: uuid.optional(),
+  format: z.enum(['json', 'csv']).default('json'),
+});
+
+export const auditListQuery = paginationQuery.extend({
+  actorUserId: uuid.optional(),
+  action: z.string().max(80).optional(),
+  targetType: z.string().max(60).optional(),
+  from: z.iso.datetime({ offset: true }).optional(),
+  to: z.iso.datetime({ offset: true }).optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Platform admin (FR-073…FR-077, FR-133, FR-136)
+// ---------------------------------------------------------------------------
+
+export const adminUserListQuery = paginationQuery.extend({
+  type: z.enum(['CUSTOMER', 'SHOPKEEPER', 'SUPER_ADMIN']).optional(),
+  status: z.enum(['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED', 'DEACTIVATED']).optional(),
+  q: z.string().trim().max(100).optional(),
+});
+export const adminUserStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'SUSPENDED']),
+  reason: z.string().trim().min(5).max(500),
+});
+export const adminPlanUpdateSchema = z
+  .object({
+    priceMonthly: moneyOrZero,
+    priceYearly: moneyOrZero,
+    trialDays: z.number().int().min(0).max(365),
+    graceDays: z.number().int().min(0).max(90),
+    maxUsers: z.number().int().min(1).nullable(),
+    maxBranches: z.number().int().min(1).nullable(),
+    maxProducts: z.number().int().min(1).nullable(),
+    maxImagesPerProduct: z.number().int().min(1).max(30),
+    onlineStoreEnabled: z.boolean(),
+    isActive: z.boolean(),
+    isPublic: z.boolean(),
+  })
+  .partial()
+  .extend({ reason: z.string().trim().min(5).max(500) });
+export const adminSubscriptionSchema = z.object({
+  planId: uuid.optional(),
+  status: z.enum(['TRIALING', 'ACTIVE', 'PAST_DUE', 'SUSPENDED', 'CANCELLED', 'EXPIRED']).optional(),
+  currentPeriodEnd: z.iso.datetime({ offset: true }).optional(),
+  reason: z.string().trim().min(5).max(500),
+});
+export const adminProductListQuery = paginationQuery.extend({
+  moderationStatus: z.enum(['VISIBLE', 'UNDER_REVIEW', 'HIDDEN', 'REMOVED']).optional(),
+  q: z.string().trim().max(100).optional(),
+});
+export const adminModerationSchema = z.object({
+  moderationStatus: z.enum(['VISIBLE', 'HIDDEN', 'REMOVED']),
+  reason: z.string().trim().min(5).max(500),
+});
+export const adminAuditQuery = auditListQuery.extend({
+  kind: z.enum(['admin', 'shop']).default('admin'),
+  shopId: uuid.optional(),
+});
+export const publicShopListQuery = paginationQuery.extend({ q: z.string().trim().max(100).optional() });
