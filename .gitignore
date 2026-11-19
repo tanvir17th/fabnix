@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+apps/backend/src/generated/
+apps/backend/storage/
+.tmp/
+*.log
+.DS_Store

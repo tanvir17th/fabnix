@@ -1,0 +1,27 @@
+{
+  "name": "@fabnix/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FABNIX shared domain engine: decimal-safe measurement & pricing, Zod schemas, enums, permissions, order state machine",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest"
+  },
+  "dependencies": {
+    "decimal.js": "10.6.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/jest": "30.0.0",
+    "jest": "30.5.2",
+    "ts-jest": "29.4.15",
+    "typescript": "5.9.3",
+    "@types/node": "22.20.5"
+  }
+}

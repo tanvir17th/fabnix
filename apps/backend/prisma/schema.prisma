@@ -1,0 +1,2407 @@
+// =============================================================================
+// FABNIX — Prisma schema (PostgreSQL 16+)
+// SRS v1.1 · Milestone 1 baseline · 2026-11-19
+//
+// Conventions
+//   • UUIDv7 primary keys (time-ordered → better B-tree locality than v4).
+//   • Lengths      : Decimal(14,4)  canonical INCHES                (BR-003)
+//   • Money        : Decimal(14,2)  in the shop's currency          (BR-010)
+//   • Conv. factors: Decimal(18,8)  inches per unit                 (FR-013)
+//   • Rates/cost   : Decimal(14,4) per price unit; Decimal(18,6) per inch
+//   • Tax %        : Decimal(7,4)   e.g. 15.0000
+//   • Timestamps   : timestamptz, stored UTC                        (BR-014)
+//   • Tenant-owned rows carry shopId. Children reference parents through
+//     COMPOSITE FKs (shopId, id) so a row can never point at another shop's
+//     product/customer/branch, even if application code is wrong (§8.2).
+//   • Append-only ledgers (stock_movements, payments, *_status_history,
+//     audit_logs, admin_audit_logs) are additionally protected by triggers in
+//     prisma/sql/constraints.sql (BR-009, BR-015).
+//   • CHECK constraints, partial unique indexes and trigram search indexes
+//     that Prisma cannot express live in prisma/sql/constraints.sql and are
+//     appended to the initial migration.
+//   • Actor columns named *ById without a Prisma relation are plain user ids;
+//     attribution is also recorded in audit_logs.
+// =============================================================================
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+  runtime      = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URL lives in prisma.config.ts (Prisma 7).
+}
+
+// -----------------------------------------------------------------------------
+// ENUMS
+// -----------------------------------------------------------------------------
+
+/// Exactly three top-level user types (SRS v1.1 §A1).
+enum UserType {
+  CUSTOMER
+  SHOPKEEPER
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum Language {
+  bn
+  en
+}
+
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  PHONE_VERIFY
+  PASSWORD_RESET
+  LOGIN_OTP
+  GUEST_CONTACT_VERIFY
+}
+
+enum ShopStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum PermissionScope {
+  SHOP
+  PLATFORM
+}
+
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum UnitKind {
+  INCH
+  YARD
+  METRE
+  CENTIMETRE
+  GIRA
+  CUSTOM
+}
+
+enum TaxMode {
+  NONE
+  EXCLUSIVE
+  INCLUSIVE
+}
+
+enum RoundingMode {
+  HALF_UP
+  HALF_EVEN
+}
+
+enum CashRounding {
+  NONE
+  NEAREST_1
+  NEAREST_5
+}
+
+enum StockDeductionMilestone {
+  ON_CONFIRMATION
+  ON_DISPATCH
+}
+
+enum StockVisibility {
+  HIDE
+  STATUS_ONLY
+  EXACT
+}
+
+enum CategoryStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ModerationStatus {
+  VISIBLE
+  UNDER_REVIEW
+  HIDDEN
+  REMOVED
+}
+
+enum DiscountType {
+  NONE
+  PERCENT
+  FIXED
+}
+
+enum StockMovementType {
+  OPENING
+  PURCHASE_IN
+  PURCHASE_CANCEL_OUT
+  SALE_OUT
+  SALE_CANCEL_IN
+  SALE_RETURN_IN
+  ORDER_RESERVE
+  ORDER_RESERVATION_RELEASE
+  ORDER_DEDUCT_OUT
+  ORDER_CANCEL_IN
+  ORDER_RETURN_IN
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  DAMAGE_OUT
+  TRANSFER_OUT
+  TRANSFER_IN
+}
+
+enum ReservationStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+  EXPIRED
+}
+
+enum TransferStatus {
+  DRAFT
+  DISPATCHED
+  RECEIVED
+  CANCELLED
+}
+
+enum SaleChannel {
+  POS
+  ONLINE
+}
+
+/// Lifecycle status. Payment state is tracked separately in PaymentStatus so
+/// "partially paid + returned" is representable (FR-043).
+enum SaleStatus {
+  DRAFT
+  COMPLETED
+  CANCELLED
+  PARTIALLY_RETURNED
+  RETURNED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  FAILED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum PaymentMethodType {
+  CASH
+  CARD
+  BANK_TRANSFER
+  BKASH
+  NAGAD
+  ROCKET
+  CASH_ON_DELIVERY
+  ONLINE_GATEWAY
+  STORE_CREDIT
+  OTHER
+}
+
+enum PaymentDirection {
+  IN
+  OUT
+}
+
+enum LedgerEntryStatus {
+  POSTED
+  REVERSED
+}
+
+enum PurchaseStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum RecordStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum DocumentType {
+  INVOICE
+  ONLINE_ORDER
+  PURCHASE
+  RETURN
+  TRANSFER
+}
+
+enum StorefrontStatus {
+  UNPUBLISHED
+  PUBLISHED
+  PAUSED
+}
+
+enum DeliveryMethod {
+  HOME_DELIVERY
+  PICKUP
+}
+
+enum DeliveryChargeType {
+  FLAT
+  ZONE
+  FREE_OVER_THRESHOLD
+}
+
+enum CartStatus {
+  ACTIVE
+  CONVERTED
+  ABANDONED
+  EXPIRED
+}
+
+/// SRS §A3.1
+enum OrderStatus {
+  PENDING_CONFIRMATION
+  CONFIRMED
+  REJECTED
+  PROCESSING
+  READY_FOR_PICKUP
+  DISPATCHED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+enum OrderReturnState {
+  NONE
+  PARTIAL
+  FULL
+}
+
+enum ActorType {
+  CUSTOMER
+  SHOPKEEPER
+  SUPER_ADMIN
+  SYSTEM
+}
+
+enum NoteVisibility {
+  INTERNAL
+  CUSTOMER
+}
+
+enum RevisionStatus {
+  PROPOSED
+  ACCEPTED
+  DECLINED
+  SUPERSEDED
+}
+
+enum DeliveryStatus {
+  PENDING
+  PACKED
+  DISPATCHED
+  DELIVERED
+  FAILED
+  RETURNED
+}
+
+enum ReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  RECEIVED
+  REFUNDED
+  CLOSED
+}
+
+enum StockDisposition {
+  RESTOCK
+  DAMAGED
+  DISCARD
+}
+
+enum PaymentTxnStatus {
+  INITIATED
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+}
+
+enum IdempotencyStatus {
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+enum BillingPeriod {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum SubscriptionInvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+}
+
+enum ReportTargetType {
+  STOREFRONT
+  PRODUCT
+  PRODUCT_IMAGE
+}
+
+enum ReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+enum ModerationActionType {
+  HIDE
+  REMOVE
+  RESTORE
+  SUSPEND_STOREFRONT
+  REINSTATE_STOREFRONT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_ON_USER
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+// =============================================================================
+// IDENTITY & AUTH  (FR-001…FR-007, §10)
+// =============================================================================
+
+model User {
+  id                 String     @id @default(uuid(7)) @db.Uuid
+  type               UserType
+  fullName           String     @db.VarChar(150)
+  /// Lower-cased, trimmed. Unique per user type (separate customer/business portals).
+  email              String?    @db.VarChar(254)
+  /// E.164, e.g. +8801XXXXXXXXX
+  phone              String?    @db.VarChar(20)
+  emailVerifiedAt    DateTime?  @db.Timestamptz(3)
+  phoneVerifiedAt    DateTime?  @db.Timestamptz(3)
+  /// Argon2id encoded hash. Never exposed to any role, including Super Admin.
+  passwordHash       String
+  status             UserStatus @default(PENDING_VERIFICATION)
+  /// NULL = never chosen → fall back to onboarding/product default (BR-013).
+  preferredLanguage  Language?
+  timezone           String?    @db.VarChar(64)
+  avatarKey          String?
+  twoFactorEnabled   Boolean    @default(false)
+  /// AES-GCM encrypted TOTP secret (app-level key from secret store).
+  twoFactorSecretEnc String?
+  failedLoginCount   Int        @default(0)
+  lockedUntil        DateTime?  @db.Timestamptz(3)
+  lastLoginAt        DateTime?  @db.Timestamptz(3)
+  suspendedReason    String?
+  /// Set when PII is anonymized on account deletion; financial history kept.
+  anonymizedAt       DateTime?  @db.Timestamptz(3)
+  createdAt          DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime   @updatedAt @db.Timestamptz(3)
+
+  refreshTokens      RefreshToken[]
+  verificationTokens VerificationToken[]
+  ownedShops         Shop[]              @relation("ShopOwner")
+  memberships        ShopMember[]
+  invitationsSent    ShopInvitation[]    @relation("InvitationSender")
+  adminRoles         AdminUserRole[]
+  addresses          CustomerAddress[]
+  customerProfiles   Customer[]
+  carts              OnlineCart[]
+  orders             OnlineOrder[]
+  salesCreated       Sale[]              @relation("SaleCashier")
+  purchasesCreated   Purchase[]          @relation("PurchaseCreator")
+  expensesCreated    Expense[]           @relation("ExpenseCreator")
+  paymentsReceived   Payment[]           @relation("PaymentReceiver")
+  stockMovements     StockMovement[]
+  orderStatusChanges OrderStatusHistory[]
+  orderNotes         OrderNote[]
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference[]
+  pushDevices        PushDevice[]
+  auditLogs          AuditLog[]
+  adminAuditLogs     AdminAuditLog[]
+  supportSessions    SupportAccessSession[]
+  contentReports     ContentReport[]
+  moderationActions  ModerationAction[]
+  ticketsRequested   SupportTicket[]     @relation("TicketRequester")
+  ticketsAssigned    SupportTicket[]     @relation("TicketAssignee")
+  ticketMessages     SupportTicketMessage[]
+  claimedGuests      GuestIdentity[]
+
+  @@unique([type, email])
+  @@unique([type, phone])
+  @@index([status])
+  @@map("users")
+}
+
+/// Rotating refresh tokens with family-based reuse detection (FR-004).
+model RefreshToken {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  userId       String    @db.Uuid
+  /// All rotations of one login share a familyId; reuse of a rotated token revokes the family.
+  familyId     String    @db.Uuid
+  /// SHA-256 of the opaque token; the raw token is never stored.
+  tokenHash    String    @unique @db.VarChar(64)
+  userAgent    String?   @db.VarChar(512)
+  ipAddress    String?   @db.VarChar(45)
+  expiresAt    DateTime  @db.Timestamptz(3)
+  rotatedAt    DateTime? @db.Timestamptz(3)
+  replacedById String?   @db.Uuid
+  revokedAt    DateTime? @db.Timestamptz(3)
+  revokeReason String?   @db.VarChar(64)
+  createdAt    DateTime  @default(now()) @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+/// Email links / OTPs / password reset tokens (FR-001, FR-003). Hashed, single-use, time-limited.
+model VerificationToken {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  userId      String?             @db.Uuid
+  purpose     VerificationPurpose
+  /// Email or E.164 phone the code was sent to.
+  destination String              @db.VarChar(254)
+  tokenHash   String              @db.VarChar(64)
+  attempts    Int                 @default(0)
+  maxAttempts Int                 @default(5)
+  expiresAt   DateTime            @db.Timestamptz(3)
+  consumedAt  DateTime?           @db.Timestamptz(3)
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([destination, purpose])
+  @@index([userId, purpose])
+  @@map("verification_tokens")
+}
+
+// =============================================================================
+// PERMISSIONS  (FR-005, §A1.2) — catalog is platform-defined, roles are presets
+// =============================================================================
+
+model Permission {
+  /// Stable code, e.g. "pos.sale.create", "inventory.adjust", "platform.shops.suspend"
+  code           String          @id @db.VarChar(80)
+  scope          PermissionScope
+  /// i18n key for the label: "permissions.pos.sale.create"
+  labelKey       String          @db.VarChar(120)
+  isSensitive    Boolean         @default(false)
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+
+  shopRoles  ShopRolePermission[]
+  adminRoles AdminRolePermission[]
+
+  @@index([scope])
+  @@map("permissions")
+}
+
+/// Shop-scoped permission preset (Owner, Manager, Cashier, Stock Operator, custom…).
+/// Not a top-level user type (§A1.2).
+model ShopRole {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  shopId      String   @db.Uuid
+  name        String   @db.VarChar(80)
+  /// Seeded preset key ("owner", "manager", "cashier", "stock_operator"); null for custom roles.
+  presetKey   String?  @db.VarChar(40)
+  /// The owner role is immutable and always holds every SHOP permission.
+  isOwnerRole Boolean  @default(false)
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  shop        Shop                 @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  permissions ShopRolePermission[]
+  members     ShopMember[]
+  invitations ShopInvitation[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, name])
+  @@map("shop_roles")
+}
+
+model ShopRolePermission {
+  shopId         String @db.Uuid
+  roleId         String @db.Uuid
+  permissionCode String @db.VarChar(80)
+
+  role       ShopRole   @relation(fields: [shopId, roleId], references: [shopId, id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionCode], references: [code], onDelete: Restrict)
+
+  @@id([roleId, permissionCode])
+  @@index([shopId])
+  @@map("shop_role_permissions")
+}
+
+/// User ↔ Shop membership with per-shop role & status (FR-006, FR-063, FR-064).
+/// Only users of type SHOPKEEPER may hold memberships (enforced in service + CHECK via trigger).
+model ShopMember {
+  id                String           @id @default(uuid(7)) @db.Uuid
+  shopId            String           @db.Uuid
+  userId            String           @db.Uuid
+  roleId            String           @db.Uuid
+  status            MembershipStatus @default(ACTIVE)
+  isOwner           Boolean          @default(false)
+  /// true = access to every branch; false = only branches in shop_member_branches.
+  allBranches       Boolean          @default(true)
+  joinedAt          DateTime         @default(now()) @db.Timestamptz(3)
+  suspendedAt       DateTime?        @db.Timestamptz(3)
+  removedAt         DateTime?        @db.Timestamptz(3)
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+
+  shop     Shop               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  user     User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role     ShopRole           @relation(fields: [shopId, roleId], references: [shopId, id], onDelete: Restrict)
+  branches ShopMemberBranch[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, userId])
+  @@index([userId, status])
+  @@map("shop_members")
+}
+
+model ShopMemberBranch {
+  shopId   String @db.Uuid
+  memberId String @db.Uuid
+  branchId String @db.Uuid
+
+  member ShopMember @relation(fields: [shopId, memberId], references: [shopId, id], onDelete: Cascade)
+  branch Branch     @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+
+  @@id([memberId, branchId])
+  @@index([shopId])
+  @@map("shop_member_branches")
+}
+
+model ShopInvitation {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  shopId      String    @db.Uuid
+  roleId      String    @db.Uuid
+  email       String?   @db.VarChar(254)
+  phone       String?   @db.VarChar(20)
+  tokenHash   String    @unique @db.VarChar(64)
+  branchIds   String[]  @db.Uuid
+  invitedById String    @db.Uuid
+  expiresAt   DateTime  @db.Timestamptz(3)
+  acceptedAt  DateTime? @db.Timestamptz(3)
+  revokedAt   DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  shop      Shop     @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  role      ShopRole @relation(fields: [shopId, roleId], references: [shopId, id], onDelete: Restrict)
+  invitedBy User     @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+
+  @@index([shopId])
+  @@map("shop_invitations")
+}
+
+/// Platform-level roles for SUPER_ADMIN users (granular, audited — §A1.1).
+model AdminRole {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String   @unique @db.VarChar(80)
+  description String?
+  createdAt   DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(3)
+
+  permissions AdminRolePermission[]
+  users       AdminUserRole[]
+
+  @@map("admin_roles")
+}
+
+model AdminRolePermission {
+  roleId         String @db.Uuid
+  permissionCode String @db.VarChar(80)
+
+  role       AdminRole  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionCode], references: [code], onDelete: Restrict)
+
+  @@id([roleId, permissionCode])
+  @@map("admin_role_permissions")
+}
+
+model AdminUserRole {
+  userId     String   @db.Uuid
+  roleId     String   @db.Uuid
+  grantedById String? @db.Uuid
+  grantedAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  user User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+  role AdminRole @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([userId, roleId])
+  @@map("admin_user_roles")
+}
+
+// =============================================================================
+// SHOP / TENANT  (FR-008…FR-011)
+// =============================================================================
+
+model Shop {
+  id               String     @id @default(uuid(7)) @db.Uuid
+  ownerUserId      String     @db.Uuid
+  name             String     @db.VarChar(150)
+  legalName        String?    @db.VarChar(200)
+  /// Short uppercase code used in document numbers, e.g. "ABC".
+  code             String     @unique @db.VarChar(12)
+  logoKey          String?
+  phone            String?    @db.VarChar(20)
+  email            String?    @db.VarChar(254)
+  addressLine      String?    @db.VarChar(300)
+  city             String?    @db.VarChar(100)
+  district         String?    @db.VarChar(100)
+  postalCode       String?    @db.VarChar(20)
+  /// ISO 3166-1 alpha-2
+  country          String     @default("BD") @db.Char(2)
+  timezone         String     @default("Asia/Dhaka") @db.VarChar(64)
+  /// ISO 4217
+  currency         String     @default("BDT") @db.Char(3)
+  /// Suggested onboarding language for new staff; user preference always wins.
+  defaultLanguage  Language   @default(bn)
+  businessCategory String?    @db.VarChar(80)
+  status           ShopStatus @default(PENDING_APPROVAL)
+  statusReason     String?
+  createdAt        DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime   @updatedAt @db.Timestamptz(3)
+
+  owner              User                 @relation("ShopOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  settings           ShopSettings?
+  roles              ShopRole[]
+  members            ShopMember[]
+  invitations        ShopInvitation[]
+  branches           Branch[]
+  measurementUnits   MeasurementUnit[]
+  paymentMethods     ShopPaymentMethod[]
+  sequences          DocumentSequence[]
+  categories         Category[]
+  products           Product[]
+  productImages      ProductImage[]
+  inventory          Inventory[]
+  stockMovements     StockMovement[]
+  reservations       InventoryReservation[]
+  transfers          StockTransfer[]
+  customers          Customer[]
+  suppliers          Supplier[]
+  sales              Sale[]
+  saleItems          SaleItem[]
+  payments           Payment[]
+  returns            ReturnRequest[]
+  purchases          Purchase[]
+  purchaseItems      PurchaseItem[]
+  supplierPayments   SupplierPayment[]
+  expenseCategories  ExpenseCategory[]
+  expenses           Expense[]
+  storefront         Storefront?
+  deliveryOptions    DeliveryOption[]
+  carts              OnlineCart[]
+  orders             OnlineOrder[]
+  orderItems         OnlineOrderItem[]
+  paymentTxns        PaymentTransaction[]
+  subscription       Subscription?
+  subscriptionInvoices SubscriptionInvoice[]
+  auditLogs          AuditLog[]
+  supportSessions    SupportAccessSession[]
+  contentReports     ContentReport[]
+  supportTickets     SupportTicket[]
+  notifications      Notification[]
+
+  @@index([status])
+  @@index([ownerUserId])
+  @@map("shops")
+}
+
+/// 1:1 shop configuration (FR-009, FR-016, FR-029, FR-045, FR-118, FR-121).
+model ShopSettings {
+  shopId                   String                  @id @db.Uuid
+  dateFormat               String                  @default("dd/MM/yyyy") @db.VarChar(20)
+  /// "bn-BD" renders Bangla digits; "en-IN" lakh grouping; "en-US" western.
+  numberLocale             String                  @default("bn-BD") @db.VarChar(10)
+  currencyPrecision        Int                     @default(2) @db.SmallInt
+  roundingMode             RoundingMode            @default(HALF_UP)
+  cashRounding             CashRounding            @default(NONE)
+  /// Decimal places shown for lengths in UI/invoices (storage is always 4).
+  lengthDisplayPrecision   Int                     @default(2) @db.SmallInt
+  taxMode                  TaxMode                 @default(NONE)
+  defaultTaxRate           Decimal                 @default(0) @db.Decimal(7, 4)
+  taxRegistrationNo        String?                 @db.VarChar(40)
+  allowNegativeStock       Boolean                 @default(false)
+  defaultLowStockInches    Decimal                 @default(360) @db.Decimal(14, 4)
+  defaultDisplayUnitCode   String                  @default("YARD") @db.VarChar(20)
+  defaultInvoiceLanguage   Language                @default(bn)
+  invoicePrefix            String                  @default("INV") @db.VarChar(12)
+  /// true → sequences reset each calendar year (period key "2026").
+  invoiceYearlyReset       Boolean                 @default(true)
+  invoiceFooterNote        String?
+  /// { "sat": [["10:00","21:00"]], "fri": [] , ... }
+  businessHours            Json?
+  /// Online-order reservation TTL while PENDING_CONFIRMATION.
+  reservationTtlMinutes    Int                     @default(1440)
+  stockDeductionMilestone  StockDeductionMilestone @default(ON_CONFIRMATION)
+  allowPartialPayment      Boolean                 @default(true)
+  allowDueSales            Boolean                 @default(true)
+  updatedAt                DateTime                @updatedAt @db.Timestamptz(3)
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("shop_settings")
+}
+
+model Branch {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  shopId      String       @db.Uuid
+  name        String       @db.VarChar(120)
+  code        String       @db.VarChar(12)
+  phone       String?      @db.VarChar(20)
+  addressLine String?      @db.VarChar(300)
+  isDefault   Boolean      @default(false)
+  status      BranchStatus @default(ACTIVE)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @db.Timestamptz(3)
+
+  shop               Shop                   @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  memberScopes       ShopMemberBranch[]
+  inventory          Inventory[]
+  stockMovements     StockMovement[]
+  reservations       InventoryReservation[]
+  transfersOut       StockTransfer[]        @relation("TransferFrom")
+  transfersIn        StockTransfer[]        @relation("TransferTo")
+  sales              Sale[]
+  purchases          Purchase[]
+  expenses           Expense[]
+  fulfilmentForStore Storefront[]
+  orders             OnlineOrder[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, code])
+  @@map("branches")
+}
+
+/// Shop-specific length unit. Rows are IMMUTABLE once used: changing a factor
+/// inserts a new version and deactivates the old (BR-004). A partial unique
+/// index guarantees one active version per (shopId, code).
+model MeasurementUnit {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  shopId           String   @db.Uuid
+  /// "YARD", "INCH", "GIRA", "METRE", "CM", or custom like "HAAT"
+  code             String   @db.VarChar(20)
+  kind             UnitKind
+  /// Display name as entered; system units use nameKey for i18n instead.
+  name             String   @db.VarChar(50)
+  nameKey          String?  @db.VarChar(80)
+  symbol           String   @db.VarChar(12)
+  inchesPerUnit    Decimal  @db.Decimal(18, 8)
+  version          Int      @default(1)
+  isActive         Boolean  @default(true)
+  /// Standard units (inch/yard/metre/cm) have fixed factors and cannot be edited.
+  isStandard       Boolean  @default(false)
+  enabledForPos    Boolean  @default(true)
+  enabledOnline    Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  supersededById   String?  @db.Uuid
+  createdById      String?  @db.Uuid
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+  deactivatedAt    DateTime? @db.Timestamptz(3)
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@unique([shopId, id])
+  @@unique([shopId, code, version])
+  @@map("measurement_units")
+}
+
+model ShopPaymentMethod {
+  id              String            @id @default(uuid(7)) @db.Uuid
+  shopId          String            @db.Uuid
+  type            PaymentMethodType
+  label           String            @db.VarChar(60)
+  /// e.g. bKash merchant number shown to customers for manual payment.
+  instructions    String?
+  accountRef      String?           @db.VarChar(60)
+  availableInPos  Boolean           @default(true)
+  availableOnline Boolean           @default(false)
+  isActive        Boolean           @default(true)
+  sortOrder       Int               @default(0)
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime          @updatedAt @db.Timestamptz(3)
+
+  shop             Shop              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  payments         Payment[]
+  supplierPayments SupplierPayment[]
+  expenses         Expense[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, label])
+  @@map("shop_payment_methods")
+}
+
+/// Gap-free per-shop document numbering (FR-045, BR-002). Incremented with
+/// UPDATE … SET next_value = next_value + 1 RETURNING inside the business tx.
+/// POS invoices and online-order invoices share the INVOICE sequence so
+/// invoice numbers are unique across both channels within a shop.
+model DocumentSequence {
+  shopId    String       @db.Uuid
+  docType   DocumentType
+  /// "2026" when yearly reset is on, otherwise "ALL".
+  periodKey String       @db.VarChar(8)
+  prefix    String       @db.VarChar(12)
+  nextValue Int          @default(1)
+  padding   Int          @default(6) @db.SmallInt
+  updatedAt DateTime     @updatedAt @db.Timestamptz(3)
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@id([shopId, docType, periodKey])
+  @@map("document_sequences")
+}
+
+// =============================================================================
+// CATALOGUE  (FR-020…FR-025, FR-091…FR-095)
+// =============================================================================
+
+model Category {
+  id        String         @id @default(uuid(7)) @db.Uuid
+  shopId    String         @db.Uuid
+  parentId  String?        @db.Uuid
+  name      String         @db.VarChar(100)
+  slug      String         @db.VarChar(120)
+  sortOrder Int            @default(0)
+  status    CategoryStatus @default(ACTIVE)
+  createdAt DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime       @updatedAt @db.Timestamptz(3)
+
+  shop     Shop       @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  parent   Category?  @relation("CategoryTree", fields: [shopId, parentId], references: [shopId, id], onDelete: Restrict)
+  children Category[] @relation("CategoryTree")
+  products Product[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, slug])
+  @@index([shopId, parentId])
+  @@map("categories")
+}
+
+model Product {
+  id                   String           @id @default(uuid(7)) @db.Uuid
+  shopId               String           @db.Uuid
+  categoryId           String?          @db.Uuid
+  /// User-entered, never auto-translated (NFR-L10N-007).
+  name                 String           @db.VarChar(200)
+  slug                 String           @db.VarChar(220)
+  sku                  String           @db.VarChar(64)
+  barcode              String?          @db.VarChar(64)
+  description          String?
+  fabricType           String?          @db.VarChar(80)
+  brand                String?          @db.VarChar(80)
+  color                String?          @db.VarChar(60)
+  /// Hex for storefront swatch filter, e.g. "#1E3A8A"
+  colorHex             String?          @db.Char(7)
+  pattern              String?          @db.VarChar(60)
+  material             String?          @db.VarChar(120)
+  widthInches          Decimal?         @db.Decimal(8, 2)
+  /// Unit code the rates are quoted in ("YARD", "METRE", custom). Resolved to the
+  /// active MeasurementUnit version at transaction time and snapshotted.
+  priceUnitCode        String           @default("YARD") @db.VarChar(20)
+  sellingRate          Decimal          @db.Decimal(14, 4)
+  purchaseRate         Decimal?         @db.Decimal(14, 4)
+  /// Overrides ShopSettings.defaultTaxRate when not null.
+  taxRate              Decimal?         @db.Decimal(7, 4)
+  lowStockThresholdInches Decimal?      @db.Decimal(14, 4)
+  minOrderInches       Decimal?         @db.Decimal(14, 4)
+  /// Cut increment online, e.g. 9 inches = ¼ yard.
+  orderStepInches      Decimal?         @db.Decimal(14, 4)
+  status               ProductStatus    @default(ACTIVE)
+  availableInPos       Boolean          @default(true)
+  isPublishedOnline    Boolean          @default(false)
+  publishedAt          DateTime?        @db.Timestamptz(3)
+  moderationStatus     ModerationStatus @default(VISIBLE)
+  moderationReason     String?
+  createdById          String?          @db.Uuid
+  createdAt            DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime         @updatedAt @db.Timestamptz(3)
+  archivedAt           DateTime?        @db.Timestamptz(3)
+
+  shop           Shop                   @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  category       Category?              @relation(fields: [shopId, categoryId], references: [shopId, id], onDelete: Restrict)
+  images         ProductImage[]
+  inventory      Inventory[]
+  stockMovements StockMovement[]
+  reservations   InventoryReservation[]
+  transferItems  StockTransferItem[]
+  saleItems      SaleItem[]
+  purchaseItems  PurchaseItem[]
+  cartItems      CartItem[]
+  orderItems     OnlineOrderItem[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, sku])
+  @@unique([shopId, barcode])
+  @@unique([shopId, slug])
+  @@index([shopId, status])
+  @@index([shopId, categoryId])
+  @@index([shopId, isPublishedOnline, moderationStatus, status])
+  @@map("products")
+}
+
+model ProductImage {
+  id               String           @id @default(uuid(7)) @db.Uuid
+  shopId           String           @db.Uuid
+  productId        String           @db.Uuid
+  storageKey       String
+  thumbnailKey     String?
+  mediumKey        String?
+  mimeType         String           @db.VarChar(40)
+  sizeBytes        Int
+  width            Int
+  height           Int
+  altText          String?          @db.VarChar(200)
+  sortOrder        Int              @default(0)
+  moderationStatus ModerationStatus @default(VISIBLE)
+  moderationReason String?
+  uploadedById     String?          @db.Uuid
+  createdAt        DateTime         @default(now()) @db.Timestamptz(3)
+  deletedAt        DateTime?        @db.Timestamptz(3)
+
+  shop    Shop    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+
+  @@index([shopId, productId, sortOrder])
+  @@map("product_images")
+}
+
+// =============================================================================
+// INVENTORY  (FR-026…FR-034, FR-118…FR-122)
+// =============================================================================
+
+/// Current balance per (branch, product). The ONLY row locked (SELECT … FOR
+/// UPDATE) by POS sales, order reservations, purchases and adjustments, so all
+/// channels serialize on the same lock (FR-119, AC-023).
+/// available = onHandInches − reservedInches.
+model Inventory {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  shopId           String   @db.Uuid
+  branchId         String   @db.Uuid
+  productId        String   @db.Uuid
+  onHandInches     Decimal  @default(0) @db.Decimal(14, 4)
+  reservedInches   Decimal  @default(0) @db.Decimal(14, 4)
+  /// Moving-average cost per inch for valuation (FR-033).
+  avgCostPerInch   Decimal  @default(0) @db.Decimal(18, 6)
+  lastMovementAt   DateTime? @db.Timestamptz(3)
+  /// Optimistic version counter for diagnostics; correctness relies on row locks.
+  version          Int      @default(0)
+  updatedAt        DateTime @updatedAt @db.Timestamptz(3)
+
+  shop    Shop    @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch  Branch  @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+  product Product @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+
+  @@unique([shopId, branchId, productId])
+  @@index([shopId, productId])
+  @@map("inventory")
+}
+
+/// Append-only stock ledger — the auditable source of truth (§8.2, BR-009).
+/// Reservation movements change reservedInches only; physical movements change onHandInches.
+model StockMovement {
+  id                  String            @id @default(uuid(7)) @db.Uuid
+  shopId              String            @db.Uuid
+  branchId            String            @db.Uuid
+  productId           String            @db.Uuid
+  type                StockMovementType
+  /// Signed change to on-hand (negative = out).
+  deltaOnHandInches   Decimal           @default(0) @db.Decimal(14, 4)
+  /// Signed change to reserved.
+  deltaReservedInches Decimal           @default(0) @db.Decimal(14, 4)
+  onHandAfterInches   Decimal           @db.Decimal(14, 4)
+  reservedAfterInches Decimal           @db.Decimal(14, 4)
+  unitCostPerInch     Decimal?          @db.Decimal(18, 6)
+  // Typed references (at most a few are set per row; see CHECK in constraints.sql)
+  saleItemId          String?           @db.Uuid
+  orderItemId         String?           @db.Uuid
+  reservationId       String?           @db.Uuid
+  purchaseItemId      String?           @db.Uuid
+  transferItemId      String?           @db.Uuid
+  returnItemId        String?           @db.Uuid
+  /// Compensating entries point at the movement they reverse.
+  reversesMovementId  String?           @unique @db.Uuid
+  reason              String?           @db.VarChar(300)
+  actorUserId         String?           @db.Uuid
+  actorType           ActorType         @default(SHOPKEEPER)
+  createdAt           DateTime          @default(now()) @db.Timestamptz(3)
+
+  shop             Shop                  @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch           Branch                @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+  product          Product               @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+  saleItem         SaleItem?             @relation(fields: [shopId, saleItemId], references: [shopId, id], onDelete: Restrict)
+  orderItem        OnlineOrderItem?      @relation(fields: [shopId, orderItemId], references: [shopId, id], onDelete: Restrict)
+  reservation      InventoryReservation? @relation(fields: [shopId, reservationId], references: [shopId, id], onDelete: Restrict)
+  purchaseItem     PurchaseItem?         @relation(fields: [shopId, purchaseItemId], references: [shopId, id], onDelete: Restrict)
+  transferItem     StockTransferItem?    @relation(fields: [transferItemId], references: [id], onDelete: Restrict)
+  returnItem       ReturnItem?           @relation(fields: [returnItemId], references: [id], onDelete: Restrict)
+  reversesMovement StockMovement?        @relation("MovementReversal", fields: [reversesMovementId], references: [id], onDelete: Restrict)
+  reversedBy       StockMovement?        @relation("MovementReversal")
+  actor            User?                 @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, branchId, productId, createdAt])
+  @@index([shopId, createdAt])
+  @@index([shopId, type, createdAt])
+  @@index([saleItemId])
+  @@index([orderItemId])
+  @@index([purchaseItemId])
+  @@map("stock_movements")
+}
+
+/// Online-order stock hold (FR-118, FR-120). Exactly one per order item.
+/// Status transitions use guarded UPDATE … WHERE status = 'ACTIVE' so a
+/// release can happen exactly once (AC-024).
+model InventoryReservation {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  shopId         String            @db.Uuid
+  branchId       String            @db.Uuid
+  productId      String            @db.Uuid
+  orderId        String            @db.Uuid
+  orderItemId    String            @unique @db.Uuid
+  reservedInches Decimal           @db.Decimal(14, 4)
+  status         ReservationStatus @default(ACTIVE)
+  /// NULL after confirmation when the deduction milestone is ON_DISPATCH (hold until dispatch).
+  expiresAt      DateTime?         @db.Timestamptz(3)
+  consumedAt     DateTime?         @db.Timestamptz(3)
+  releasedAt     DateTime?         @db.Timestamptz(3)
+  releaseReason  String?           @db.VarChar(64)
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime          @updatedAt @db.Timestamptz(3)
+
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch         Branch          @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+  product        Product         @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+  order          OnlineOrder     @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  orderItem      OnlineOrderItem @relation(fields: [shopId, orderItemId], references: [shopId, id], onDelete: Restrict)
+  stockMovements StockMovement[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, orderItemId])
+  @@index([status, expiresAt])
+  @@index([shopId, orderId])
+  @@map("inventory_reservations")
+}
+
+/// Inter-branch transfer (FR-034, Phase 2 — schema ready).
+model StockTransfer {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  shopId         String         @db.Uuid
+  transferNumber String         @db.VarChar(32)
+  fromBranchId   String         @db.Uuid
+  toBranchId     String         @db.Uuid
+  status         TransferStatus @default(DRAFT)
+  note           String?
+  createdById    String         @db.Uuid
+  dispatchedById String?        @db.Uuid
+  dispatchedAt   DateTime?      @db.Timestamptz(3)
+  receivedById   String?        @db.Uuid
+  receivedAt     DateTime?      @db.Timestamptz(3)
+  cancelledAt    DateTime?      @db.Timestamptz(3)
+  createdAt      DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime       @updatedAt @db.Timestamptz(3)
+
+  shop       Shop                @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  fromBranch Branch              @relation("TransferFrom", fields: [shopId, fromBranchId], references: [shopId, id], onDelete: Restrict)
+  toBranch   Branch              @relation("TransferTo", fields: [shopId, toBranchId], references: [shopId, id], onDelete: Restrict)
+  items      StockTransferItem[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, transferNumber])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id             String  @id @default(uuid(7)) @db.Uuid
+  shopId         String  @db.Uuid
+  transferId     String  @db.Uuid
+  productId      String  @db.Uuid
+  lengthInches   Decimal @db.Decimal(14, 4)
+  receivedInches Decimal? @db.Decimal(14, 4)
+
+  transfer       StockTransfer   @relation(fields: [shopId, transferId], references: [shopId, id], onDelete: Restrict)
+  product        Product         @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+  stockMovements StockMovement[]
+
+  @@index([shopId, transferId])
+  @@map("stock_transfer_items")
+}
+
+// =============================================================================
+// CUSTOMERS & SUPPLIERS  (FR-050…FR-054)
+// =============================================================================
+
+/// Shop-scoped customer (CRM/receivables) record. Online buyers get one
+/// automatically, linked to their CUSTOMER User via userId.
+model Customer {
+  id             String       @id @default(uuid(7)) @db.Uuid
+  shopId         String       @db.Uuid
+  userId         String?      @db.Uuid
+  name           String       @db.VarChar(150)
+  phone          String?      @db.VarChar(20)
+  email          String?      @db.VarChar(254)
+  addressLine    String?      @db.VarChar(300)
+  notes          String?
+  /// Cached receivable; recomputed transactionally on every sale/payment post.
+  balanceDue     Decimal      @default(0) @db.Decimal(14, 2)
+  status         RecordStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime     @updatedAt @db.Timestamptz(3)
+
+  shop     Shop          @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  user     User?         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  sales    Sale[]
+  payments Payment[]
+  orders   OnlineOrder[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, phone])
+  @@unique([shopId, userId])
+  @@index([shopId, name])
+  @@map("customers")
+}
+
+/// Customer User's saved delivery addresses (platform-level, not tenant-owned).
+model CustomerAddress {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  userId       String   @db.Uuid
+  label        String?  @db.VarChar(40)
+  recipientName String  @db.VarChar(150)
+  phone        String   @db.VarChar(20)
+  addressLine  String   @db.VarChar(300)
+  area         String?  @db.VarChar(100)
+  city         String   @db.VarChar(100)
+  district     String?  @db.VarChar(100)
+  postalCode   String?  @db.VarChar(20)
+  country      String   @default("BD") @db.Char(2)
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("customer_addresses")
+}
+
+/// Guest checkout identity (FR-107, Should). Claimable later by a verified Customer User.
+model GuestIdentity {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  phone           String    @db.VarChar(20)
+  email           String?   @db.VarChar(254)
+  verifiedAt      DateTime? @db.Timestamptz(3)
+  claimedByUserId String?   @db.Uuid
+  claimedAt       DateTime? @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+
+  claimedBy User?         @relation(fields: [claimedByUserId], references: [id], onDelete: Restrict)
+  carts     OnlineCart[]
+  orders    OnlineOrder[]
+
+  @@index([phone])
+  @@map("guest_identities")
+}
+
+model Supplier {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  shopId        String       @db.Uuid
+  name          String       @db.VarChar(150)
+  contactPerson String?      @db.VarChar(150)
+  phone         String?      @db.VarChar(20)
+  email         String?      @db.VarChar(254)
+  addressLine   String?      @db.VarChar(300)
+  notes         String?
+  balancePayable Decimal     @default(0) @db.Decimal(14, 2)
+  status        RecordStatus @default(ACTIVE)
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
+
+  shop      Shop              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  purchases Purchase[]
+  payments  SupplierPayment[]
+
+  @@unique([shopId, id])
+  @@index([shopId, name])
+  @@map("suppliers")
+}
+
+// =============================================================================
+// POS SALES & INVOICES  (FR-035…FR-049)
+// =============================================================================
+
+model Sale {
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  shopId                String        @db.Uuid
+  branchId              String        @db.Uuid
+  channel               SaleChannel   @default(POS)
+  /// Assigned on completion from the shop's INVOICE sequence. NULL while DRAFT.
+  invoiceNumber         String?       @db.VarChar(40)
+  customerId            String?       @db.Uuid
+  cashierUserId         String        @db.Uuid
+  status                SaleStatus    @default(DRAFT)
+  paymentStatus         PaymentStatus @default(UNPAID)
+  currency              String        @db.Char(3)
+  invoiceLanguage       Language
+  taxMode               TaxMode
+  subtotal              Decimal       @default(0) @db.Decimal(14, 2)
+  lineDiscountTotal     Decimal       @default(0) @db.Decimal(14, 2)
+  invoiceDiscountType   DiscountType  @default(NONE)
+  invoiceDiscountValue  Decimal       @default(0) @db.Decimal(14, 4)
+  invoiceDiscountAmount Decimal       @default(0) @db.Decimal(14, 2)
+  taxTotal              Decimal       @default(0) @db.Decimal(14, 2)
+  roundingAdjustment    Decimal       @default(0) @db.Decimal(14, 2)
+  grandTotal            Decimal       @default(0) @db.Decimal(14, 2)
+  paidAmount            Decimal       @default(0) @db.Decimal(14, 2)
+  refundedAmount        Decimal       @default(0) @db.Decimal(14, 2)
+  dueAmount             Decimal       @default(0) @db.Decimal(14, 2)
+  /// Shop name/address/phone/logo/tax-no at sale time (FR-049).
+  shopSnapshot          Json?
+  customerSnapshot      Json?
+  /// Rounding/precision/tax settings in force at sale time.
+  calcPolicySnapshot    Json?
+  notes                 String?
+  /// Client-generated key; replay returns the original sale (FR-042, AC-013).
+  idempotencyKey        String        @db.VarChar(80)
+  soldAt                DateTime      @default(now()) @db.Timestamptz(3)
+  completedAt           DateTime?     @db.Timestamptz(3)
+  cancelledAt           DateTime?     @db.Timestamptz(3)
+  cancelledById         String?       @db.Uuid
+  cancelReason          String?       @db.VarChar(300)
+  createdAt             DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime      @updatedAt @db.Timestamptz(3)
+
+  shop     Shop            @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch   Branch          @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+  customer Customer?       @relation(fields: [shopId, customerId], references: [shopId, id], onDelete: Restrict)
+  cashier  User            @relation("SaleCashier", fields: [cashierUserId], references: [id], onDelete: Restrict)
+  items    SaleItem[]
+  payments Payment[]
+  returns  ReturnRequest[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, invoiceNumber])
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, soldAt])
+  @@index([shopId, status, soldAt])
+  @@index([shopId, paymentStatus])
+  @@index([shopId, customerId])
+  @@index([shopId, cashierUserId, soldAt])
+  @@index([shopId, branchId, soldAt])
+  @@map("sales")
+}
+
+/// Immutable line snapshot (FR-019, BR-005). Never updated after the sale completes
+/// except for the returnedInches counter.
+model SaleItem {
+  id                 String       @id @default(uuid(7)) @db.Uuid
+  shopId             String       @db.Uuid
+  saleId             String       @db.Uuid
+  productId          String       @db.Uuid
+  lineNo             Int          @db.SmallInt
+  // --- product snapshot ---
+  productName        String       @db.VarChar(200)
+  sku                String       @db.VarChar(64)
+  productSnapshot    Json
+  // --- measurement ---
+  /// As entered: [{"unit":"YARD","value":"5"},{"unit":"GIRA","value":"4"}]
+  enteredMeasurement Json
+  /// Human string used on invoice, e.g. "5 yd 4 gira"
+  enteredDisplay     String       @db.VarChar(80)
+  /// Length of one cut, canonical inches.
+  lengthInches       Decimal      @db.Decimal(14, 4)
+  /// Identical cuts of the same length.
+  pieces             Int          @default(1)
+  totalLengthInches  Decimal      @db.Decimal(14, 4)
+  /// Every unit factor used: [{"code":"GIRA","unitId":"…","version":2,"inchesPerUnit":"2.25"}]
+  conversionSnapshot Json
+  // --- pricing ---
+  priceUnitCode      String       @db.VarChar(20)
+  priceUnitInches    Decimal      @db.Decimal(18, 8)
+  listUnitRate       Decimal      @db.Decimal(14, 4)
+  unitRate           Decimal      @db.Decimal(14, 4)
+  rateOverridden     Boolean      @default(false)
+  overrideReason     String?      @db.VarChar(300)
+  overrideById       String?      @db.Uuid
+  grossAmount        Decimal      @db.Decimal(14, 2)
+  discountType       DiscountType @default(NONE)
+  discountValue      Decimal      @default(0) @db.Decimal(14, 4)
+  discountAmount     Decimal      @default(0) @db.Decimal(14, 2)
+  /// Share of invoice-level discount allocated to this line (for returns/tax).
+  allocatedInvoiceDiscount Decimal @default(0) @db.Decimal(14, 2)
+  taxRate            Decimal      @default(0) @db.Decimal(7, 4)
+  taxAmount          Decimal      @default(0) @db.Decimal(14, 2)
+  lineTotal          Decimal      @db.Decimal(14, 2)
+  costPerInch        Decimal?     @db.Decimal(18, 6)
+  returnedInches     Decimal      @default(0) @db.Decimal(14, 4)
+  createdAt          DateTime     @default(now()) @db.Timestamptz(3)
+
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  sale           Sale            @relation(fields: [shopId, saleId], references: [shopId, id], onDelete: Restrict)
+  product        Product         @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+  stockMovements StockMovement[]
+  returnItems    ReturnItem[]
+
+  @@unique([shopId, id])
+  @@unique([saleId, lineNo])
+  @@index([shopId, productId])
+  @@map("sale_items")
+}
+
+/// Money in/out allocated to exactly one sale, online order or return (BR-008).
+/// Append-only: reversal = new row with reversesPaymentId (FR-062).
+model Payment {
+  id                String            @id @default(uuid(7)) @db.Uuid
+  shopId            String            @db.Uuid
+  saleId            String?           @db.Uuid
+  orderId           String?           @db.Uuid
+  returnId          String?           @db.Uuid
+  customerId        String?           @db.Uuid
+  paymentMethodId   String            @db.Uuid
+  methodType        PaymentMethodType
+  direction         PaymentDirection  @default(IN)
+  amount            Decimal           @db.Decimal(14, 2)
+  currency          String            @db.Char(3)
+  status            LedgerEntryStatus @default(POSTED)
+  /// bKash TrxID, bank ref, card slip no…
+  reference         String?           @db.VarChar(100)
+  /// Set when created from a verified gateway transaction (FR-126).
+  paymentTxnId      String?           @unique @db.Uuid
+  reversesPaymentId String?           @unique @db.Uuid
+  note              String?           @db.VarChar(300)
+  receivedById      String?           @db.Uuid
+  receivedAt        DateTime          @default(now()) @db.Timestamptz(3)
+  idempotencyKey    String?           @db.VarChar(80)
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+
+  shop          Shop                @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  sale          Sale?               @relation(fields: [shopId, saleId], references: [shopId, id], onDelete: Restrict)
+  order         OnlineOrder?        @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  returnRequest ReturnRequest?      @relation(fields: [shopId, returnId], references: [shopId, id], onDelete: Restrict)
+  customer      Customer?           @relation(fields: [shopId, customerId], references: [shopId, id], onDelete: Restrict)
+  method        ShopPaymentMethod   @relation(fields: [shopId, paymentMethodId], references: [shopId, id], onDelete: Restrict)
+  paymentTxn    PaymentTransaction? @relation(fields: [paymentTxnId], references: [id], onDelete: Restrict)
+  reverses      Payment?            @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversedBy    Payment?            @relation("PaymentReversal")
+  receivedBy    User?               @relation("PaymentReceiver", fields: [receivedById], references: [id], onDelete: Restrict)
+
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, receivedAt])
+  @@index([shopId, saleId])
+  @@index([shopId, orderId])
+  @@index([shopId, customerId])
+  @@map("payments")
+}
+
+/// Return/refund for a POS sale OR an online order (FR-044, FR-130).
+/// Exactly one of saleId/orderId is set (CHECK in constraints.sql).
+model ReturnRequest {
+  id            String       @id @default(uuid(7)) @db.Uuid
+  shopId        String       @db.Uuid
+  returnNumber  String       @db.VarChar(32)
+  channel       SaleChannel
+  saleId        String?      @db.Uuid
+  orderId       String?      @db.Uuid
+  status        ReturnStatus @default(REQUESTED)
+  reasonCode    String       @db.VarChar(40)
+  reasonText    String?
+  /// Storage keys of customer-supplied evidence photos.
+  evidenceKeys  String[]
+  refundAmount  Decimal      @default(0) @db.Decimal(14, 2)
+  requestedByType ActorType
+  requestedById String?      @db.Uuid
+  decidedById   String?      @db.Uuid
+  decidedAt     DateTime?    @db.Timestamptz(3)
+  decisionNote  String?
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime     @updatedAt @db.Timestamptz(3)
+
+  shop     Shop         @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  sale     Sale?        @relation(fields: [shopId, saleId], references: [shopId, id], onDelete: Restrict)
+  order    OnlineOrder? @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  items    ReturnItem[]
+  payments Payment[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, returnNumber])
+  @@index([shopId, status])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  shopId         String           @db.Uuid
+  returnId       String           @db.Uuid
+  saleItemId     String?          @db.Uuid
+  orderItemId    String?          @db.Uuid
+  returnedInches Decimal          @db.Decimal(14, 4)
+  refundAmount   Decimal          @db.Decimal(14, 2)
+  disposition    StockDisposition @default(RESTOCK)
+
+  returnRequest  ReturnRequest    @relation(fields: [shopId, returnId], references: [shopId, id], onDelete: Restrict)
+  saleItem       SaleItem?        @relation(fields: [shopId, saleItemId], references: [shopId, id], onDelete: Restrict)
+  orderItem      OnlineOrderItem? @relation(fields: [shopId, orderItemId], references: [shopId, id], onDelete: Restrict)
+  stockMovements StockMovement[]
+
+  @@index([shopId, returnId])
+  @@map("return_items")
+}
+
+// =============================================================================
+// PURCHASES  (FR-055…FR-057)
+// =============================================================================
+
+model Purchase {
+  id                String         @id @default(uuid(7)) @db.Uuid
+  shopId            String         @db.Uuid
+  branchId          String         @db.Uuid
+  supplierId        String         @db.Uuid
+  purchaseNumber    String         @db.VarChar(32)
+  supplierInvoiceRef String?       @db.VarChar(60)
+  status            PurchaseStatus @default(DRAFT)
+  paymentStatus     PaymentStatus  @default(UNPAID)
+  purchaseDate      DateTime       @db.Date
+  currency          String         @db.Char(3)
+  subtotal          Decimal        @default(0) @db.Decimal(14, 2)
+  discountAmount    Decimal        @default(0) @db.Decimal(14, 2)
+  taxAmount         Decimal        @default(0) @db.Decimal(14, 2)
+  otherCharges      Decimal        @default(0) @db.Decimal(14, 2)
+  total             Decimal        @default(0) @db.Decimal(14, 2)
+  paidAmount        Decimal        @default(0) @db.Decimal(14, 2)
+  dueAmount         Decimal        @default(0) @db.Decimal(14, 2)
+  notes             String?
+  idempotencyKey    String?        @db.VarChar(80)
+  createdById       String         @db.Uuid
+  postedById        String?        @db.Uuid
+  postedAt          DateTime?      @db.Timestamptz(3)
+  cancelledById     String?        @db.Uuid
+  cancelledAt       DateTime?      @db.Timestamptz(3)
+  cancelReason      String?        @db.VarChar(300)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  shop      Shop              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch    Branch            @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+  supplier  Supplier          @relation(fields: [shopId, supplierId], references: [shopId, id], onDelete: Restrict)
+  createdBy User              @relation("PurchaseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  items     PurchaseItem[]
+  payments  SupplierPayment[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, purchaseNumber])
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, purchaseDate])
+  @@index([shopId, supplierId])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  shopId             String   @db.Uuid
+  purchaseId         String   @db.Uuid
+  productId          String   @db.Uuid
+  lineNo             Int      @db.SmallInt
+  productName        String   @db.VarChar(200)
+  enteredMeasurement Json
+  receivedInches     Decimal  @db.Decimal(14, 4)
+  conversionSnapshot Json
+  costUnitCode       String   @db.VarChar(20)
+  costUnitInches     Decimal  @db.Decimal(18, 8)
+  unitCost           Decimal  @db.Decimal(14, 4)
+  discountAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  taxAmount          Decimal  @default(0) @db.Decimal(14, 2)
+  lineTotal          Decimal  @db.Decimal(14, 2)
+  /// Landed cost per inch used for moving-average valuation.
+  costPerInch        Decimal  @db.Decimal(18, 6)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  purchase       Purchase        @relation(fields: [shopId, purchaseId], references: [shopId, id], onDelete: Restrict)
+  product        Product         @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+  stockMovements StockMovement[]
+
+  @@unique([shopId, id])
+  @@unique([purchaseId, lineNo])
+  @@index([shopId, productId])
+  @@map("purchase_items")
+}
+
+model SupplierPayment {
+  id                String            @id @default(uuid(7)) @db.Uuid
+  shopId            String            @db.Uuid
+  supplierId        String            @db.Uuid
+  purchaseId        String?           @db.Uuid
+  paymentMethodId   String            @db.Uuid
+  amount            Decimal           @db.Decimal(14, 2)
+  reference         String?           @db.VarChar(100)
+  status            LedgerEntryStatus @default(POSTED)
+  reversesPaymentId String?           @unique @db.Uuid
+  paidAt            DateTime          @default(now()) @db.Timestamptz(3)
+  note              String?           @db.VarChar(300)
+  createdById       String            @db.Uuid
+  createdAt         DateTime          @default(now()) @db.Timestamptz(3)
+
+  shop     Shop              @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  supplier Supplier          @relation(fields: [shopId, supplierId], references: [shopId, id], onDelete: Restrict)
+  purchase Purchase?         @relation(fields: [shopId, purchaseId], references: [shopId, id], onDelete: Restrict)
+  method   ShopPaymentMethod @relation(fields: [shopId, paymentMethodId], references: [shopId, id], onDelete: Restrict)
+  reverses   SupplierPayment? @relation("SupplierPaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: Restrict)
+  reversedBy SupplierPayment? @relation("SupplierPaymentReversal")
+
+  @@index([shopId, supplierId])
+  @@index([shopId, paidAt])
+  @@map("supplier_payments")
+}
+
+// =============================================================================
+// EXPENSES  (FR-058…FR-062)
+// =============================================================================
+
+model ExpenseCategory {
+  id        String       @id @default(uuid(7)) @db.Uuid
+  shopId    String       @db.Uuid
+  name      String       @db.VarChar(80)
+  /// Seeded categories (rent, salary, utilities…) carry an i18n key.
+  nameKey   String?      @db.VarChar(80)
+  status    RecordStatus @default(ACTIVE)
+  createdAt DateTime     @default(now()) @db.Timestamptz(3)
+
+  shop     Shop      @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  expenses Expense[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, name])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id              String            @id @default(uuid(7)) @db.Uuid
+  shopId          String            @db.Uuid
+  branchId        String?           @db.Uuid
+  categoryId      String            @db.Uuid
+  paymentMethodId String?           @db.Uuid
+  amount          Decimal           @db.Decimal(14, 2)
+  currency        String            @db.Char(3)
+  expenseDate     DateTime          @db.Date
+  note            String?
+  attachmentKey   String?
+  status          LedgerEntryStatus @default(POSTED)
+  /// Adjustment entries reference the expense they correct.
+  reversesExpenseId String?         @unique @db.Uuid
+  createdById     String            @db.Uuid
+  createdAt       DateTime          @default(now()) @db.Timestamptz(3)
+
+  shop       Shop               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  branch     Branch?            @relation(fields: [shopId, branchId], references: [shopId, id], onDelete: Restrict)
+  category   ExpenseCategory    @relation(fields: [shopId, categoryId], references: [shopId, id], onDelete: Restrict)
+  method     ShopPaymentMethod? @relation(fields: [shopId, paymentMethodId], references: [shopId, id], onDelete: Restrict)
+  createdBy  User               @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  reverses   Expense?           @relation("ExpenseReversal", fields: [reversesExpenseId], references: [id], onDelete: Restrict)
+  reversedBy Expense?           @relation("ExpenseReversal")
+
+  @@index([shopId, expenseDate])
+  @@index([shopId, categoryId, expenseDate])
+  @@map("expenses")
+}
+
+// =============================================================================
+// ONLINE STOREFRONT  (FR-086…FR-098)
+// =============================================================================
+
+model Storefront {
+  id                 String           @id @default(uuid(7)) @db.Uuid
+  shopId             String           @unique @db.Uuid
+  /// fabnix.com/shop/<slug>. Lower-case [a-z0-9-], 3–60 chars, reserved list enforced in app (FR-088).
+  slug               String           @unique @db.VarChar(60)
+  isEnabled          Boolean          @default(false)
+  status             StorefrontStatus @default(UNPUBLISHED)
+  displayName        String           @db.VarChar(150)
+  tagline            String?          @db.VarChar(200)
+  description        String?
+  logoKey            String?
+  bannerKey          String?
+  contactPhone       String?          @db.VarChar(20)
+  whatsappPhone      String?          @db.VarChar(20)
+  contactEmail       String?          @db.VarChar(254)
+  addressLine        String?          @db.VarChar(300)
+  /// Free-text coverage summary shown to customers; rules live in delivery_options.
+  deliveryCoverage   String?
+  openingStatusNote  String?          @db.VarChar(200)
+  acceptingOrders    Boolean          @default(true)
+  fulfilmentBranchId String           @db.Uuid
+  stockVisibility    StockVisibility  @default(STATUS_ONLY)
+  minOrderAmount     Decimal?         @db.Decimal(14, 2)
+  returnPolicy       String?
+  termsText          String?
+  deliveryInfo       String?
+  allowGuestCheckout Boolean          @default(false)
+  // Platform moderation — independent of the shopkeeper's own status (FR-132)
+  adminSuspended     Boolean          @default(false)
+  adminSuspendReason String?
+  adminSuspendedAt   DateTime?        @db.Timestamptz(3)
+  publishedAt        DateTime?        @db.Timestamptz(3)
+  createdAt          DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime         @updatedAt @db.Timestamptz(3)
+
+  shop             Shop          @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  fulfilmentBranch Branch        @relation(fields: [shopId, fulfilmentBranchId], references: [shopId, id], onDelete: Restrict)
+  orders           OnlineOrder[]
+
+  @@unique([shopId, id])
+  @@index([status, isEnabled, adminSuspended])
+  @@map("storefronts")
+}
+
+/// Delivery / pickup options (FR-090, FR-104, FR-127).
+model DeliveryOption {
+  id               String             @id @default(uuid(7)) @db.Uuid
+  shopId           String             @db.Uuid
+  method           DeliveryMethod
+  name             String             @db.VarChar(80)
+  chargeType       DeliveryChargeType @default(FLAT)
+  flatFee          Decimal            @default(0) @db.Decimal(14, 2)
+  /// Orders at/above this subtotal ship free (FREE_OVER_THRESHOLD).
+  freeOverAmount   Decimal?           @db.Decimal(14, 2)
+  estimatedDaysMin Int?               @db.SmallInt
+  estimatedDaysMax Int?               @db.SmallInt
+  isActive         Boolean            @default(true)
+  sortOrder        Int                @default(0)
+  createdAt        DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime           @updatedAt @db.Timestamptz(3)
+
+  shop   Shop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  zones  DeliveryZone[]
+  orders OnlineOrder[]
+
+  @@unique([shopId, id])
+  @@map("delivery_options")
+}
+
+model DeliveryZone {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  shopId           String   @db.Uuid
+  deliveryOptionId String   @db.Uuid
+  name             String   @db.VarChar(80)
+  /// District / upazila / area codes covered by this zone.
+  areaCodes        String[]
+  fee              Decimal  @db.Decimal(14, 2)
+  isActive         Boolean  @default(true)
+
+  option DeliveryOption @relation(fields: [shopId, deliveryOptionId], references: [shopId, id], onDelete: Restrict)
+
+  @@index([shopId, deliveryOptionId])
+  @@map("delivery_zones")
+}
+
+// =============================================================================
+// CART & ONLINE ORDERS  (FR-099…FR-131)
+// =============================================================================
+
+model OnlineCart {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  shopId         String     @db.Uuid
+  customerUserId String?    @db.Uuid
+  guestId        String?    @db.Uuid
+  status         CartStatus @default(ACTIVE)
+  expiresAt      DateTime   @db.Timestamptz(3)
+  createdAt      DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime   @updatedAt @db.Timestamptz(3)
+
+  shop         Shop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  customerUser User?          @relation(fields: [customerUserId], references: [id], onDelete: Restrict)
+  guest        GuestIdentity? @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  items        CartItem[]
+
+  @@unique([shopId, id])
+  @@index([customerUserId, status])
+  @@map("online_carts")
+}
+
+model CartItem {
+  id                    String   @id @default(uuid(7)) @db.Uuid
+  shopId                String   @db.Uuid
+  cartId                String   @db.Uuid
+  productId             String   @db.Uuid
+  enteredMeasurement    Json
+  lengthInches          Decimal  @db.Decimal(14, 4)
+  pieces                Int      @default(1)
+  conversionSnapshot    Json
+  /// What the customer was shown; checkout compares against live price (FR-102).
+  displayedUnitRate     Decimal  @db.Decimal(14, 4)
+  displayedLineTotal    Decimal  @db.Decimal(14, 2)
+  createdAt             DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime @updatedAt @db.Timestamptz(3)
+
+  cart    OnlineCart @relation(fields: [shopId, cartId], references: [shopId, id], onDelete: Cascade)
+  product Product    @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+
+  @@index([cartId])
+  @@map("cart_items")
+}
+
+model OnlineOrder {
+  id                     String                  @id @default(uuid(7)) @db.Uuid
+  shopId                 String                  @db.Uuid
+  storefrontId           String                  @db.Uuid
+  fulfilmentBranchId     String                  @db.Uuid
+  /// Shown to customer, e.g. "ABC-ORD-2026-000042"
+  orderNumber            String                  @db.VarChar(40)
+  /// Assigned at confirmation from the shared INVOICE sequence.
+  invoiceNumber          String?                 @db.VarChar(40)
+  customerUserId         String?                 @db.Uuid
+  guestId                String?                 @db.Uuid
+  /// Shop-scoped CRM record (auto-upserted at submission).
+  customerId             String                  @db.Uuid
+  status                 OrderStatus             @default(PENDING_CONFIRMATION)
+  paymentStatus          PaymentStatus           @default(UNPAID)
+  returnState            OrderReturnState        @default(NONE)
+  currency               String                  @db.Char(3)
+  invoiceLanguage        Language
+  taxMode                TaxMode
+  subtotal               Decimal                 @db.Decimal(14, 2)
+  discountTotal          Decimal                 @default(0) @db.Decimal(14, 2)
+  taxTotal               Decimal                 @default(0) @db.Decimal(14, 2)
+  deliveryFee            Decimal                 @default(0) @db.Decimal(14, 2)
+  roundingAdjustment     Decimal                 @default(0) @db.Decimal(14, 2)
+  total                  Decimal                 @db.Decimal(14, 2)
+  paidAmount             Decimal                 @default(0) @db.Decimal(14, 2)
+  refundedAmount         Decimal                 @default(0) @db.Decimal(14, 2)
+  paymentMethodType      PaymentMethodType
+  // --- address & contact snapshot (FR-103) ---
+  recipientName          String                  @db.VarChar(150)
+  recipientPhone         String                  @db.VarChar(20)
+  recipientEmail         String?                 @db.VarChar(254)
+  addressLine            String?                 @db.VarChar(300)
+  area                   String?                 @db.VarChar(100)
+  city                   String?                 @db.VarChar(100)
+  district               String?                 @db.VarChar(100)
+  postalCode             String?                 @db.VarChar(20)
+  deliveryInstructions   String?                 @db.VarChar(500)
+  deliveryOptionId       String                  @db.Uuid
+  deliveryOptionSnapshot Json
+  shopSnapshot           Json
+  calcPolicySnapshot     Json
+  stockDeductionMilestone StockDeductionMilestone
+  /// Bumped when a customer-acknowledged revision is accepted (FR-113).
+  revision               Int                     @default(1)
+  idempotencyKey         String                  @db.VarChar(80)
+  placedAt               DateTime                @default(now()) @db.Timestamptz(3)
+  confirmedAt            DateTime?               @db.Timestamptz(3)
+  rejectedAt             DateTime?               @db.Timestamptz(3)
+  rejectionReason        String?                 @db.VarChar(300)
+  cancelledAt            DateTime?               @db.Timestamptz(3)
+  cancelledByType        ActorType?
+  cancelReason           String?                 @db.VarChar(300)
+  stockDeductedAt        DateTime?               @db.Timestamptz(3)
+  dispatchedAt           DateTime?               @db.Timestamptz(3)
+  deliveredAt            DateTime?               @db.Timestamptz(3)
+  completedAt            DateTime?               @db.Timestamptz(3)
+  createdAt              DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime                @updatedAt @db.Timestamptz(3)
+
+  shop             Shop                   @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  storefront       Storefront             @relation(fields: [shopId, storefrontId], references: [shopId, id], onDelete: Restrict)
+  fulfilmentBranch Branch                 @relation(fields: [shopId, fulfilmentBranchId], references: [shopId, id], onDelete: Restrict)
+  customerUser     User?                  @relation(fields: [customerUserId], references: [id], onDelete: Restrict)
+  guest            GuestIdentity?         @relation(fields: [guestId], references: [id], onDelete: Restrict)
+  customer         Customer               @relation(fields: [shopId, customerId], references: [shopId, id], onDelete: Restrict)
+  deliveryOption   DeliveryOption         @relation(fields: [shopId, deliveryOptionId], references: [shopId, id], onDelete: Restrict)
+  items            OnlineOrderItem[]
+  reservations     InventoryReservation[]
+  statusHistory    OrderStatusHistory[]
+  notes            OrderNote[]
+  revisions        OrderRevision[]
+  delivery         Delivery?
+  payments         Payment[]
+  paymentTxns      PaymentTransaction[]
+  returns          ReturnRequest[]
+  supportTickets   SupportTicket[]
+
+  @@unique([shopId, id])
+  @@unique([shopId, orderNumber])
+  @@unique([shopId, invoiceNumber])
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, status, placedAt])
+  @@index([shopId, paymentStatus])
+  @@index([shopId, customerId])
+  @@index([customerUserId, placedAt])
+  @@index([shopId, placedAt])
+  @@map("online_orders")
+}
+
+/// Immutable order-line snapshot (FR-123).
+model OnlineOrderItem {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  shopId             String   @db.Uuid
+  orderId            String   @db.Uuid
+  productId          String   @db.Uuid
+  lineNo             Int      @db.SmallInt
+  productName        String   @db.VarChar(200)
+  sku                String   @db.VarChar(64)
+  imageKey           String?
+  productSnapshot    Json
+  enteredMeasurement Json
+  enteredDisplay     String   @db.VarChar(80)
+  lengthInches       Decimal  @db.Decimal(14, 4)
+  pieces             Int      @default(1)
+  quantityInches     Decimal  @db.Decimal(14, 4)
+  conversionSnapshot Json
+  priceUnitCode      String   @db.VarChar(20)
+  priceUnitInches    Decimal  @db.Decimal(18, 8)
+  unitRate           Decimal  @db.Decimal(14, 4)
+  grossAmount        Decimal  @db.Decimal(14, 2)
+  discountAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  taxRate            Decimal  @default(0) @db.Decimal(7, 4)
+  taxAmount          Decimal  @default(0) @db.Decimal(14, 2)
+  lineTotal          Decimal  @db.Decimal(14, 2)
+  costPerInch        Decimal? @db.Decimal(18, 6)
+  returnedInches     Decimal  @default(0) @db.Decimal(14, 4)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+
+  shop           Shop                  @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  order          OnlineOrder           @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  product        Product               @relation(fields: [shopId, productId], references: [shopId, id], onDelete: Restrict)
+  reservation    InventoryReservation?
+  stockMovements StockMovement[]
+  returnItems    ReturnItem[]
+
+  @@unique([shopId, id])
+  @@unique([orderId, lineNo])
+  @@index([shopId, productId])
+  @@map("online_order_items")
+}
+
+/// Append-only status trail (FR-112, FR-128).
+model OrderStatusHistory {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  shopId      String       @db.Uuid
+  orderId     String       @db.Uuid
+  fromStatus  OrderStatus?
+  toStatus    OrderStatus
+  actorType   ActorType
+  actorUserId String?      @db.Uuid
+  /// Customer-visible message (localized key or free text).
+  note        String?      @db.VarChar(500)
+  createdAt   DateTime     @default(now()) @db.Timestamptz(3)
+
+  order OnlineOrder @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  actor User?       @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, orderId, createdAt])
+  @@map("order_status_history")
+}
+
+model OrderNote {
+  id           String         @id @default(uuid(7)) @db.Uuid
+  shopId       String         @db.Uuid
+  orderId      String         @db.Uuid
+  authorUserId String         @db.Uuid
+  visibility   NoteVisibility @default(INTERNAL)
+  body         String
+  createdAt    DateTime       @default(now()) @db.Timestamptz(3)
+
+  order  OnlineOrder @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  author User        @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, orderId, createdAt])
+  @@map("order_notes")
+}
+
+/// Shopkeeper-proposed change to a confirmed order; binding only after the
+/// customer accepts (FR-113).
+model OrderRevision {
+  id              String         @id @default(uuid(7)) @db.Uuid
+  shopId          String         @db.Uuid
+  orderId         String         @db.Uuid
+  revisionNo      Int
+  /// { items: [{orderItemId, newLengthInches, newUnitRate}], deliveryFee }
+  proposedChanges Json
+  proposedTotal   Decimal        @db.Decimal(14, 2)
+  reason          String         @db.VarChar(300)
+  status          RevisionStatus @default(PROPOSED)
+  proposedById    String         @db.Uuid
+  respondedAt     DateTime?      @db.Timestamptz(3)
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+
+  order OnlineOrder @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+
+  @@unique([orderId, revisionNo])
+  @@map("order_revisions")
+}
+
+model Delivery {
+  id                String         @id @default(uuid(7)) @db.Uuid
+  shopId            String         @db.Uuid
+  orderId           String         @unique @db.Uuid
+  method            DeliveryMethod
+  status            DeliveryStatus @default(PENDING)
+  provider          String?        @db.VarChar(80)
+  trackingReference String?        @db.VarChar(100)
+  trackingUrl       String?        @db.VarChar(500)
+  fee               Decimal        @db.Decimal(14, 2)
+  packedAt          DateTime?      @db.Timestamptz(3)
+  dispatchedAt      DateTime?      @db.Timestamptz(3)
+  deliveredAt       DateTime?      @db.Timestamptz(3)
+  failureReason     String?        @db.VarChar(300)
+  createdAt         DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime       @updatedAt @db.Timestamptz(3)
+
+  order OnlineOrder @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+
+  @@unique([shopId, orderId])
+  @@index([shopId, status])
+  @@map("deliveries")
+}
+
+/// Gateway payment attempt. Status changes only via verified webhook or
+/// server-side reconciliation — never browser redirect (FR-126, AC-025).
+model PaymentTransaction {
+  id                String           @id @default(uuid(7)) @db.Uuid
+  shopId            String           @db.Uuid
+  orderId           String           @db.Uuid
+  provider          String           @db.VarChar(40)
+  providerReference String?          @db.VarChar(120)
+  amount            Decimal          @db.Decimal(14, 2)
+  currency          String           @db.Char(3)
+  status            PaymentTxnStatus @default(INITIATED)
+  /// Sanitized: never full card data / secrets.
+  providerPayload   Json?
+  verifiedAt        DateTime?        @db.Timestamptz(3)
+  failureReason     String?          @db.VarChar(300)
+  idempotencyKey    String           @db.VarChar(80)
+  createdAt         DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime         @updatedAt @db.Timestamptz(3)
+
+  shop    Shop                  @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  order   OnlineOrder           @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  payment Payment?
+  events  PaymentWebhookEvent[]
+
+  @@unique([provider, providerReference])
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, orderId])
+  @@map("payment_transactions")
+}
+
+/// Webhook inbox — dedupes provider retries (idempotent callbacks).
+model PaymentWebhookEvent {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  provider          String        @db.VarChar(40)
+  providerEventId   String        @db.VarChar(120)
+  paymentTxnId      String?       @db.Uuid
+  signatureVerified Boolean
+  payload           Json
+  status            WebhookStatus @default(RECEIVED)
+  error             String?
+  receivedAt        DateTime      @default(now()) @db.Timestamptz(3)
+  processedAt       DateTime?     @db.Timestamptz(3)
+
+  paymentTxn PaymentTransaction? @relation(fields: [paymentTxnId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerEventId])
+  @@map("payment_webhook_events")
+}
+
+// =============================================================================
+// IDEMPOTENCY  (FR-042, AC-013, AC-020)
+// =============================================================================
+
+/// Generic request-level idempotency store used by the Idempotency-Key
+/// interceptor. Domain tables ALSO carry unique (shopId, idempotencyKey) as a
+/// second line of defence inside the business transaction.
+model IdempotencyRecord {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  /// "pos.sale.create", "order.submit", …
+  scope          String            @db.VarChar(60)
+  /// userId (or guestId) — keys are namespaced per actor.
+  actorId        String            @db.Uuid
+  key            String            @db.VarChar(80)
+  /// SHA-256 of canonical request body; same key + different body → 422.
+  requestHash    String            @db.VarChar(64)
+  status         IdempotencyStatus @default(IN_PROGRESS)
+  responseStatus Int?              @db.SmallInt
+  responseBody   Json?
+  resourceId     String?           @db.Uuid
+  lockedUntil    DateTime          @db.Timestamptz(3)
+  expiresAt      DateTime          @db.Timestamptz(3)
+  createdAt      DateTime          @default(now()) @db.Timestamptz(3)
+
+  @@unique([scope, actorId, key])
+  @@index([expiresAt])
+  @@map("idempotency_records")
+}
+
+// =============================================================================
+// NOTIFICATIONS  (FR-071, FR-072, FR-108, FR-129)
+// =============================================================================
+
+/// Stored as i18n key + params and rendered in the RECIPIENT's language at
+/// read/send time, so two staff can see the same alert in bn and en.
+model Notification {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  userId      String              @db.Uuid
+  shopId      String?             @db.Uuid
+  /// "stock.low", "order.placed", "order.status_changed", "subscription.past_due"…
+  type        String              @db.VarChar(60)
+  titleKey    String              @db.VarChar(120)
+  bodyKey     String              @db.VarChar(120)
+  params      Json?
+  /// Deep-link target, e.g. "/orders/<id>"
+  link        String?             @db.VarChar(300)
+  channel     NotificationChannel @default(IN_APP)
+  status      NotificationStatus  @default(PENDING)
+  dedupeKey   String?             @db.VarChar(120)
+  sentAt      DateTime?           @db.Timestamptz(3)
+  readAt      DateTime?           @db.Timestamptz(3)
+  failureReason String?           @db.VarChar(300)
+  createdAt   DateTime            @default(now()) @db.Timestamptz(3)
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shop Shop? @relation(fields: [shopId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, channel, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@index([status, channel])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  userId    String              @db.Uuid
+  type      String              @db.VarChar(60)
+  channel   NotificationChannel
+  enabled   Boolean             @default(true)
+  updatedAt DateTime            @updatedAt @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, type, channel])
+  @@map("notification_preferences")
+}
+
+model PushDevice {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  userId     String    @db.Uuid
+  platform   String    @db.VarChar(10)
+  token      String    @unique
+  lastSeenAt DateTime  @default(now()) @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_devices")
+}
+
+// =============================================================================
+// SUBSCRIPTIONS & PLANS  (FR-073…FR-078)
+// =============================================================================
+
+model Plan {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  code               String   @unique @db.VarChar(30)
+  /// i18n keys — plan names are platform UI content.
+  nameKey            String   @db.VarChar(80)
+  descriptionKey     String?  @db.VarChar(80)
+  currency           String   @default("BDT") @db.Char(3)
+  priceMonthly       Decimal  @db.Decimal(14, 2)
+  priceYearly        Decimal  @db.Decimal(14, 2)
+  trialDays          Int      @default(14) @db.SmallInt
+  graceDays          Int      @default(7) @db.SmallInt
+  /// NULL = unlimited
+  maxUsers           Int?
+  maxBranches        Int?
+  maxProducts        Int?
+  maxStorageMb       Int?
+  maxImagesPerProduct Int     @default(8) @db.SmallInt
+  onlineStoreEnabled Boolean  @default(true)
+  /// Feature flags: { "reports.advanced": true, "gateway.online": false, … }
+  features           Json     @default("{}")
+  isPublic           Boolean  @default(true)
+  isActive           Boolean  @default(true)
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @db.Timestamptz(3)
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+/// One current subscription per shop; history lives in subscription_invoices
+/// and admin_audit_logs.
+model Subscription {
+  id                 String             @id @default(uuid(7)) @db.Uuid
+  shopId             String             @unique @db.Uuid
+  planId             String             @db.Uuid
+  status             SubscriptionStatus @default(TRIALING)
+  billingPeriod      BillingPeriod      @default(MONTHLY)
+  trialEndsAt        DateTime?          @db.Timestamptz(3)
+  currentPeriodStart DateTime           @db.Timestamptz(3)
+  currentPeriodEnd   DateTime           @db.Timestamptz(3)
+  graceEndsAt        DateTime?          @db.Timestamptz(3)
+  cancelAtPeriodEnd  Boolean            @default(false)
+  cancelledAt        DateTime?          @db.Timestamptz(3)
+  createdAt          DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime           @updatedAt @db.Timestamptz(3)
+
+  shop     Shop                  @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  plan     Plan                  @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoices SubscriptionInvoice[]
+
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+/// Manual / admin-confirmed billing for the pilot (§14.3 mitigation).
+model SubscriptionInvoice {
+  id             String                    @id @default(uuid(7)) @db.Uuid
+  shopId         String                    @db.Uuid
+  subscriptionId String                    @db.Uuid
+  invoiceNumber  String                    @unique @db.VarChar(40)
+  periodStart    DateTime                  @db.Timestamptz(3)
+  periodEnd      DateTime                  @db.Timestamptz(3)
+  amount         Decimal                   @db.Decimal(14, 2)
+  currency       String                    @db.Char(3)
+  status         SubscriptionInvoiceStatus @default(ISSUED)
+  paidAt         DateTime?                 @db.Timestamptz(3)
+  paymentRef     String?                   @db.VarChar(100)
+  confirmedById  String?                   @db.Uuid
+  createdAt      DateTime                  @default(now()) @db.Timestamptz(3)
+
+  shop         Shop         @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, periodStart])
+  @@map("subscription_invoices")
+}
+
+// =============================================================================
+// AUDIT, SUPPORT & MODERATION  (FR-065, FR-077, FR-083, FR-084, §A1.1, §A2.7)
+// =============================================================================
+
+/// Business/security audit trail for shop activity. Append-only (trigger).
+model AuditLog {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  shopId      String?   @db.Uuid
+  actorUserId String?   @db.Uuid
+  actorType   ActorType
+  /// "sale.cancel", "price.override", "stock.adjust", "member.permission_change", "auth.login_failed"…
+  action      String    @db.VarChar(80)
+  targetType  String    @db.VarChar(60)
+  targetId    String?   @db.VarChar(64)
+  before      Json?
+  after       Json?
+  reason      String?   @db.VarChar(500)
+  /// Set when the actor is a Super Admin operating inside a support session.
+  supportSessionId String? @db.Uuid
+  requestId   String?   @db.VarChar(64)
+  ipAddress   String?   @db.VarChar(45)
+  userAgent   String?   @db.VarChar(512)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+
+  shop  Shop? @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  actor User? @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, createdAt])
+  @@index([shopId, actorUserId, createdAt])
+  @@index([shopId, action, createdAt])
+  @@index([shopId, targetType, targetId])
+  @@map("audit_logs")
+}
+
+/// Every privileged Super Admin action; reason is mandatory (§A1.1, AC-029).
+model AdminAuditLog {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  adminUserId      String   @db.Uuid
+  permissionCode   String   @db.VarChar(80)
+  action           String   @db.VarChar(80)
+  targetType       String   @db.VarChar(60)
+  targetId         String?  @db.VarChar(64)
+  targetShopId     String?  @db.Uuid
+  reason           String   @db.VarChar(500)
+  before           Json?
+  after            Json?
+  supportSessionId String?  @db.Uuid
+  requestId        String?  @db.VarChar(64)
+  ipAddress        String?  @db.VarChar(45)
+  userAgent        String?  @db.VarChar(512)
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  admin User @relation(fields: [adminUserId], references: [id], onDelete: Restrict)
+
+  @@index([adminUserId, createdAt])
+  @@index([targetShopId, createdAt])
+  @@index([action, createdAt])
+  @@map("admin_audit_logs")
+}
+
+/// Time-boxed, reason-bound support access into a shop context. The UI shows a
+/// persistent banner while active; no silent impersonation (§A1.1).
+model SupportAccessSession {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  adminUserId String    @db.Uuid
+  shopId      String    @db.Uuid
+  ticketId    String?   @db.Uuid
+  reason      String    @db.VarChar(500)
+  readOnly    Boolean   @default(true)
+  startedAt   DateTime  @default(now()) @db.Timestamptz(3)
+  expiresAt   DateTime  @db.Timestamptz(3)
+  endedAt     DateTime? @db.Timestamptz(3)
+
+  admin  User           @relation(fields: [adminUserId], references: [id], onDelete: Restrict)
+  shop   Shop           @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  ticket SupportTicket? @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+
+  @@index([shopId, startedAt])
+  @@index([adminUserId, endedAt])
+  @@map("support_access_sessions")
+}
+
+model ContentReport {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  shopId         String           @db.Uuid
+  reporterUserId String?          @db.Uuid
+  targetType     ReportTargetType
+  targetId       String           @db.Uuid
+  reasonCode     String           @db.VarChar(40)
+  details        String?
+  status         ReportStatus     @default(OPEN)
+  resolvedAt     DateTime?        @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @db.Timestamptz(3)
+
+  shop     Shop               @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  reporter User?              @relation(fields: [reporterUserId], references: [id], onDelete: Restrict)
+  actions  ModerationAction[]
+
+  @@index([status, createdAt])
+  @@index([targetType, targetId])
+  @@map("content_reports")
+}
+
+model ModerationAction {
+  id          String               @id @default(uuid(7)) @db.Uuid
+  adminUserId String               @db.Uuid
+  reportId    String?              @db.Uuid
+  targetType  ReportTargetType
+  targetId    String               @db.Uuid
+  action      ModerationActionType
+  reason      String               @db.VarChar(500)
+  createdAt   DateTime             @default(now()) @db.Timestamptz(3)
+
+  admin  User           @relation(fields: [adminUserId], references: [id], onDelete: Restrict)
+  report ContentReport? @relation(fields: [reportId], references: [id], onDelete: Restrict)
+
+  @@index([targetType, targetId])
+  @@map("moderation_actions")
+}
+
+model SupportTicket {
+  id              String         @id @default(uuid(7)) @db.Uuid
+  ticketNumber    String         @unique @db.VarChar(20)
+  requesterUserId String         @db.Uuid
+  shopId          String?        @db.Uuid
+  orderId         String?        @db.Uuid
+  subject         String         @db.VarChar(200)
+  status          TicketStatus   @default(OPEN)
+  priority        TicketPriority @default(NORMAL)
+  assignedAdminId String?        @db.Uuid
+  createdAt       DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(3)
+  closedAt        DateTime?      @db.Timestamptz(3)
+
+  requester       User                   @relation("TicketRequester", fields: [requesterUserId], references: [id], onDelete: Restrict)
+  assignedAdmin   User?                  @relation("TicketAssignee", fields: [assignedAdminId], references: [id], onDelete: Restrict)
+  shop            Shop?                  @relation(fields: [shopId], references: [id], onDelete: Restrict)
+  order           OnlineOrder?           @relation(fields: [shopId, orderId], references: [shopId, id], onDelete: Restrict)
+  messages        SupportTicketMessage[]
+  supportSessions SupportAccessSession[]
+
+  @@index([status, priority, createdAt])
+  @@index([requesterUserId])
+  @@map("support_tickets")
+}
+
+model SupportTicketMessage {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  ticketId       String   @db.Uuid
+  authorUserId   String   @db.Uuid
+  body           String
+  isInternal     Boolean  @default(false)
+  attachmentKeys String[]
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  author User          @relation(fields: [authorUserId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_messages")
+}

@@ -1,0 +1,69 @@
+# Local stack: docker compose -f docker/docker-compose.yml up --build
+# The web app service is added in Milestone 3.
+name: fabnix
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: fabnix
+      POSTGRES_PASSWORD: fabnix
+      POSTGRES_DB: fabnix
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fabnix -d fabnix"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+
+  minio:
+    image: minio/minio:latest  # dev only — pin a digest before shared use
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: fabnix
+      MINIO_ROOT_PASSWORD: fabnix-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [minio:/data]
+
+  minio-init:
+    image: minio/mc:latest  # dev only — pin a digest before shared use
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "until mc alias set local http://minio:9000 fabnix fabnix-secret; do sleep 1; done;
+      mc mb -p local/fabnix-media; mc anonymous set download local/fabnix-media"
+
+  migrate:
+    build: { context: .., dockerfile: docker/Dockerfile.backend }
+    command: ["npx", "prisma", "migrate", "deploy"]
+    environment:
+      DATABASE_URL: postgresql://fabnix:fabnix@postgres:5432/fabnix
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  backend:
+    build: { context: .., dockerfile: docker/Dockerfile.backend }
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://fabnix:fabnix@postgres:5432/fabnix
+      JWT_ACCESS_SECRET: local-dev-only-secret-change-me-0123456789abcdef
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: http://localhost:3000
+      AUTH_REQUIRE_VERIFICATION: "true"
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: fabnix-media
+      S3_ACCESS_KEY_ID: fabnix
+      S3_SECRET_ACCESS_KEY: fabnix-secret
+      STORAGE_PUBLIC_BASE_URL: http://localhost:9000/fabnix-media
+    ports: ["4000:4000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      minio-init: { condition: service_completed_successfully }
+
+volumes:
+  pgdata:
+  minio:
