@@ -117,7 +117,7 @@ test('shopkeeper onboards: account → shop → Gira 2.25″ → fabric with pho
   await p.getByRole('dialog').getByRole('button', { name: bn.common.save }).click();
   await expect(p.getByRole('cell', { name: /২০.*গজ|20.*গজ/ }).first()).toBeVisible();
 
-  // Created without a purchase price → no fake ৳0.00 value; adding the price later revalues stock.
+  // Created without a purchase price → "set purchase price" link; stock value uses the selling price.
   const stockRow = p.getByRole('row', { name: /সুতি লন/ });
   await expect(stockRow.getByRole('link', { name: bn.inventory.setPurchasePrice })).toBeVisible();
   await stockRow.getByRole('link', { name: bn.inventory.setPurchasePrice }).click();
@@ -126,7 +126,9 @@ test('shopkeeper onboards: account → shop → Gira 2.25″ → fabric with pho
   await expect(p.getByText(bn.common.saved)).toBeVisible();
   await p.goto(`/bn/business/${shopId}/inventory`);
   await expect(stockRow.getByRole('cell', { name: /১২০\.০০.*গজ/ })).toBeVisible(); // purchase price per yard
-  await expect(stockRow.getByRole('cell', { name: '২,৪০০.০০৳' })).toBeVisible(); // 20 yd × ৳120
+  await expect(stockRow.getByRole('cell', { name: /২০০\.০০.*গজ/ })).toBeVisible(); // selling price per yard
+  await expect(stockRow.getByRole('cell', { name: '৪,০০০.০০৳' })).toBeVisible(); // stock value: 20 yd × ৳200 selling
+  await expect(stockRow.getByRole('cell', { name: '০.০০৳', exact: true })).toBeVisible(); // total profit: nothing sold yet
   await shot(p, '02-stock-valuation');
 });
 

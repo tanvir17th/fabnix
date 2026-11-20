@@ -4,8 +4,8 @@ import { createTestApp, TestApp, uniq } from './utils/test-app';
 import { ShopFixture, openingStock, ownerWithShop, product } from './utils/fixtures';
 
 /**
- * Stock valuation (FR-033, FR-068): value = on-hand × CURRENT unit purchase price,
- * exact decimals; purchase price edits revalue stock immediately.
+ * Stock valuation (FR-033, FR-068): value = on-hand × CURRENT unit selling price,
+ * exact decimals; purchase price edits revalue cost records immediately.
  */
 describe('stock valuation & purchase price sync', () => {
   let t: TestApp;
@@ -23,11 +23,11 @@ describe('stock valuation & purchase price sync', () => {
     return r.body.items.find((i: { product: { id: string } }) => i.product.id === productId);
   };
 
-  it('a fabric created without a purchase price shows no price and no (fake 0.00) value', async () => {
+  it('a fabric created without a purchase price shows no purchase price; value uses the selling price', async () => {
     const print = await product(t, f, { name: 'Print', sku: 'PRINT-1', sellingRate: '120', purchaseRate: undefined });
     await openingStock(t, f, print.id, '20 yd');
     const row = await stockRow(print.id);
-    expect(row).toMatchObject({ purchasePrice: null, valuation: null, priceUnitCode: 'YARD', onHandInches: '720.0000' });
+    expect(row).toMatchObject({ purchasePrice: null, valuation: '2400.00', priceUnitCode: 'YARD', onHandInches: '720.0000' });
   });
 
   it('adding the purchase price later via Edit updates price, value and stock records immediately', async () => {
@@ -35,7 +35,7 @@ describe('stock valuation & purchase price sync', () => {
     await openingStock(t, f, lilan.id, '20 yd');
     const r = await owner().patch(`/shops/${f.shopId}/products/${lilan.id}`, { purchaseRate: '150' });
     expect(r.status).toBe(200);
-    expect(await stockRow(lilan.id)).toMatchObject({ purchasePrice: '150.00', valuation: '3000.00' }); // 20 yd × 150
+    expect(await stockRow(lilan.id)).toMatchObject({ purchasePrice: '150.00', sellingPrice: '200.00', valuation: '4000.00' }); // 20 yd × 200 selling
     const inv = await t.prisma.inventory.findFirstOrThrow({ where: { productId: lilan.id } });
     expect(inv.avgCostPerInch.toFixed(10)).toBe('4.1666666667'); // 150 / 36 at 10 dp
     const audit = await t.prisma.auditLog.findFirst({ where: { shopId: f.shopId, action: 'stock.revalue', targetId: lilan.id } });
@@ -43,13 +43,13 @@ describe('stock valuation & purchase price sync', () => {
     expect(audit?.after).toMatchObject({ purchaseRate: '150', inventoryRows: 1 });
   });
 
-  it('Voyel: 6,000 yd at ৳70 is exactly 420,000.00 (was 419,999.90), and at ৳80 exactly 480,000.00', async () => {
+  it('Voyel: 6,000 yd sold at ৳120 is exactly 720,000.00; purchase edits keep exact cost', async () => {
     const voyel = await product(t, f, { name: 'Voyel', sku: uniq('VOY'), sellingRate: '120', purchaseRate: '70' });
     await openingStock(t, f, voyel.id, '6000 yd');
-    expect(await stockRow(voyel.id)).toMatchObject({ purchasePrice: '70.00', valuation: '420000.00' });
+    expect(await stockRow(voyel.id)).toMatchObject({ purchasePrice: '70.00', valuation: '720000.00' });
 
     await owner().patch(`/shops/${f.shopId}/products/${voyel.id}`, { purchaseRate: '80' });
-    expect(await stockRow(voyel.id)).toMatchObject({ purchasePrice: '80.00', valuation: '480000.00' });
+    expect(await stockRow(voyel.id)).toMatchObject({ purchasePrice: '80.00', valuation: '720000.00' });
 
     // COGS uses the revalued cost too — 10 yd sold costs exactly 800.00.
     const sale = await owner().post(
@@ -61,13 +61,13 @@ describe('stock valuation & purchase price sync', () => {
     const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date());
     const profit = await owner().get(`/shops/${f.shopId}/reports/profit?from=${today}&to=${today}`);
     expect(profit.body).toMatchObject({ revenue: '1200.00', costOfGoodsSold: '800.00', grossProfit: '400.00' });
-    expect(await stockRow(voyel.id)).toMatchObject({ valuation: '479200.00' }); // 5,990 yd × 80
+    expect(await stockRow(voyel.id)).toMatchObject({ valuation: '718800.00', totalProfit: '400.00' }); // 5,990 yd × 120; 1,200 − 800
   });
 
   it('values per-metre fabrics in metres', async () => {
     const silk = await product(t, f, { name: 'Silk', sku: uniq('SILK'), sellingRate: '900', purchaseRate: '500', priceUnitCode: 'METRE' });
     await openingStock(t, f, silk.id, '3 m');
-    expect(await stockRow(silk.id)).toMatchObject({ purchasePrice: '500.00', priceUnitCode: 'METRE', valuation: '1500.00' });
+    expect(await stockRow(silk.id)).toMatchObject({ purchasePrice: '500.00', priceUnitCode: 'METRE', valuation: '2700.00' });
   });
 
   it('editing only the purchase price does not reset other fields (Zod default regression)', async () => {
@@ -96,6 +96,6 @@ describe('stock valuation & purchase price sync', () => {
     await t.prisma.$executeRawUnsafe(update);
     const inv = await t.prisma.inventory.findFirstOrThrow({ where: { productId: p.id } });
     expect(inv.avgCostPerInch.toFixed(10)).toBe('2.2222222222');
-    expect(await stockRow(p.id)).toMatchObject({ valuation: '480000.00' });
+    expect(await stockRow(p.id)).toMatchObject({ valuation: '600000.00' }); // 6,000 yd × 100 selling
   });
 });

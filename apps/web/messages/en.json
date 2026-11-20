@@ -509,7 +509,16 @@
     "ledgerNote": "Ledger entries are permanent; corrections are new entries.",
     "purchasePrice": "Purchase price",
     "setPurchasePrice": "Set purchase price",
-    "noPurchasePrice": "No purchase price set — value cannot be calculated."
+    "noPurchasePrice": "No purchase price set — value cannot be calculated.",
+    "totalFabric": "Total fabric",
+    "sellingPrice": "Selling price",
+    "totalProfit": "Total profit",
+    "soldQty": "{qty} yd sold",
+    "reservedNote": "{qty} yd held for orders",
+    "valuationHint": "On hand × selling price",
+    "profitNoCost": "Set a purchase price to calculate profit",
+    "totalPurchaseValue": "Total purchase value",
+    "totalPurchaseValueHint": "Total fabric × purchase price"
   },
   "movement": {
     "OPENING": "Opening stock",

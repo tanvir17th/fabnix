@@ -509,7 +509,16 @@
     "ledgerNote": "খাতার এন্ট্রি স্থায়ী; সংশোধন নতুন এন্ট্রি হিসেবে হয়।",
     "purchasePrice": "ক্রয়মূল্য",
     "setPurchasePrice": "ক্রয়মূল্য দিন",
-    "noPurchasePrice": "ক্রয়মূল্য দেওয়া নেই — মূল্য হিসাব করা যাচ্ছে না।"
+    "noPurchasePrice": "ক্রয়মূল্য দেওয়া নেই — মূল্য হিসাব করা যাচ্ছে না।",
+    "totalFabric": "মোট কাপড়",
+    "sellingPrice": "বিক্রয়মূল্য",
+    "totalProfit": "মোট লাভ",
+    "soldQty": "{qty} গজ বিক্রি",
+    "reservedNote": "{qty} গজ অর্ডারের জন্য রাখা",
+    "valuationHint": "হাতে থাকা × বিক্রয়মূল্য",
+    "profitNoCost": "লাভ হিসাব করতে ক্রয়মূল্য দিন",
+    "totalPurchaseValue": "মোট ক্রয়মূল্য",
+    "totalPurchaseValueHint": "মোট কাপড় × ক্রয়মূল্য"
   },
   "movement": {
     "OPENING": "প্রারম্ভিক স্টক",

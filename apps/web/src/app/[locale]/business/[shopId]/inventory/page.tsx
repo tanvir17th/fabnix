@@ -24,8 +24,18 @@ interface Row {
   /** Unit purchase price per `priceUnitCode` (e.g. per yard); null = not set on the product. */
   purchasePrice: string | null;
   priceUnitCode: string;
-  /** On hand × purchase price (server-computed, exact decimals); null when no purchase price. */
+  /** Unit selling price per `priceUnitCode`. */
+  sellingPrice: string;
+  /** On hand × selling price (server-computed, exact decimals). */
   valuation: string | null;
+  /** Total fabric × purchase price; null when no purchase price. */
+  totalPurchaseValue: string | null;
+  /** Total fabric ever added (opening, purchases, adjust-in, transfers in). */
+  totalReceivedInches: string;
+  soldInches: string;
+  /** Σ (sold amount − purchase cost); null when a sold line has no purchase price at all. */
+  totalProfit: string | null;
+  uncostedSoldLines: number;
 }
 interface Movement {
   id: string;
@@ -92,7 +102,7 @@ export default function InventoryPage() {
       {!list.data ? (
         <Loading />
       ) : (
-        <Table head={[t('product'), t('branch'), t('onHand'), t('reserved'), t('available'), t('purchasePrice'), t('valuation'), '']} empty={!list.data.items.length}>
+        <Table head={[t('product'), t('branch'), t('totalFabric'), t('onHand'), t('purchasePrice'), t('sellingPrice'), t('valuation'), t('totalPurchaseValue'), t('totalProfit'), '']} empty={!list.data.items.length}>
           {list.data.items.map((r) => (
             <tr key={r.id}>
               <Td>
@@ -104,9 +114,11 @@ export default function InventoryPage() {
                 )}
               </Td>
               <Td>{r.branch.name}</Td>
-              <Td className="tabular">{f.yards(r.onHandInches)} {unitLabel({ code: 'YARD' })}</Td>
-              <Td className="tabular text-muted">{f.yards(r.reservedInches)}</Td>
-              <Td className={`tabular font-medium ${r.lowStock ? 'text-warning' : ''}`}>{f.yards(r.availableInches)}</Td>
+              <Td className="tabular whitespace-nowrap">{f.yards(r.totalReceivedInches)} {unitLabel({ code: 'YARD' })}</Td>
+              <Td className={`tabular whitespace-nowrap font-medium ${r.lowStock ? 'text-warning' : ''}`}>
+                {f.yards(r.onHandInches)} {unitLabel({ code: 'YARD' })}
+                {Number(r.reservedInches) > 0 && <div className="text-xs font-normal text-muted">{t('reservedNote', { qty: f.yards(r.reservedInches) })}</div>}
+              </Td>
               <Td className="tabular whitespace-nowrap">
                 {r.purchasePrice ? (
                   <>
@@ -121,8 +133,23 @@ export default function InventoryPage() {
                   <span className="text-muted">—</span>
                 )}
               </Td>
-              <Td className="tabular whitespace-nowrap" title={r.valuation ? undefined : t('noPurchasePrice')}>
+              <Td className="tabular whitespace-nowrap">
+                {f.money(r.sellingPrice, access.shop.currency)}
+                <span className="text-xs text-muted"> / {unitLabel({ code: r.priceUnitCode })}</span>
+              </Td>
+              <Td className="tabular whitespace-nowrap" title={t('valuationHint')}>
                 {r.valuation ? f.money(r.valuation, access.shop.currency) : <span className="text-muted">—</span>}
+              </Td>
+              <Td className="tabular whitespace-nowrap" title={r.totalPurchaseValue ? t('totalPurchaseValueHint') : t('noPurchasePrice')}>
+                {r.totalPurchaseValue ? f.money(r.totalPurchaseValue, access.shop.currency) : <span className="text-muted">—</span>}
+              </Td>
+              <Td className="tabular whitespace-nowrap">
+                {r.totalProfit !== null ? (
+                  <span className={Number(r.totalProfit) < 0 ? 'text-danger' : undefined}>{f.money(r.totalProfit, access.shop.currency)}</span>
+                ) : (
+                  <span className="text-muted" title={t('profitNoCost')}>—</span>
+                )}
+                {Number(r.soldInches) > 0 && <div className="text-xs text-muted">{t('soldQty', { qty: f.yards(r.soldInches) })}</div>}
               </Td>
               <Td>
                 <div className="flex justify-end gap-1">

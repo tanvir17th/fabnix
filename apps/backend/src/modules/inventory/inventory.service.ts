@@ -10,15 +10,17 @@ import { UnitsService } from '../measurement/units.service';
 import { COST_DP, StockService, available } from './stock.service';
 
 /**
- * Stock value = on-hand length in price units × current unit purchase price
- * (e.g. 6,000 yd × ৳80 = ৳480,000.00). Computed from the per-unit price with
- * exact decimals and rounded ONCE — never via a rounded per-inch cost, which
- * drifted (6,000 yd × 70/36 at 6 dp gave 419,999.90).
+ * Length × per-unit price, e.g. 10 yd on hand × ৳10/yd = ৳100.00. Computed from
+ * the per-unit price with exact decimals and rounded ONCE (never via a rounded
+ * per-inch rate, which drifted to 419,999.90 instead of 420,000.00).
  */
-export function stockValue(onHandInches: string, purchaseRate: string | null, priceUnitInches: DecimalInput | undefined): string | null {
-  if (!purchaseRate || !priceUnitInches || D(purchaseRate).isZero()) return null;
-  return round(D(onHandInches).div(D(priceUnitInches)).times(purchaseRate), 2).toFixed(2);
+export function stockValue(inches: string, ratePerUnit: string | null, priceUnitInches: DecimalInput | undefined): string | null {
+  if (ratePerUnit === null || ratePerUnit === undefined || !priceUnitInches) return null;
+  return round(D(inches).div(D(priceUnitInches)).times(ratePerUnit), 2).toFixed(2);
 }
+
+/** Ledger movement types that ADD fabric to the shop (Total Fabric); PURCHASE_CANCEL_OUT undoes a purchase. */
+const RECEIVED_IN = ['OPENING', 'PURCHASE_IN', 'ADJUSTMENT_IN', 'TRANSFER_IN'] as const;
 
 @Injectable()
 export class InventoryService {
@@ -29,7 +31,15 @@ export class InventoryService {
     private readonly audit: AuditService,
   ) {}
 
-  /** Stock on hand per branch with low-stock flags (FR-032, FR-068). */
+  /**
+   * Stock table (FR-032, FR-068) per product × branch:
+   *  • Total fabric — everything ever added (opening + purchases + adjust-in + transfers in − reversed purchases)
+   *  • On hand      — live ledger balance (= total fabric − sold − write-offs/adjust-out − transfers out)
+   *  • Stock value  — on hand × current SELLING price
+ *  • Total purchase value — total fabric × current PURCHASE price
+   *  • Total profit — Σ sold lines (actual sold amount excl. tax − purchase cost); cost = recorded at sale,
+   *                   else the fabric's current purchase price (same rule as the profit report)
+   */
   async list(ctx: ShopContext, q: z.infer<typeof schemas.inventoryListQuery>) {
     if (q.branchId) ctx.requireBranch(q.branchId);
     const settings = await this.prisma.shopSettings.findUniqueOrThrow({ where: { shopId: ctx.shopId } });
@@ -43,35 +53,104 @@ export class InventoryService {
     };
     const rows = await this.prisma.inventory.findMany({
       where,
-      include: { product: { select: { id: true, name: true, sku: true, priceUnitCode: true, purchaseRate: true, lowStockThresholdInches: true } }, branch: { select: { id: true, name: true } } },
+      include: {
+        product: { select: { id: true, name: true, sku: true, priceUnitCode: true, purchaseRate: true, sellingRate: true, lowStockThresholdInches: true } },
+        branch: { select: { id: true, name: true } },
+      },
       orderBy: { id: 'asc' },
       take: q.limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
     });
+    const page = rows.slice(0, q.limit);
+    const productIds = [...new Set(page.map((r) => r.productId))];
     const table = await this.units.table(ctx.shopId, 'ANY');
-    const mapped = rows.slice(0, q.limit).map((r) => {
-      const value = stockValue(r.onHandInches.toString(), r.product.purchaseRate?.toString() ?? null, table.byCode(r.product.priceUnitCode)?.inchesPerUnit);
-      const avail = D(r.onHandInches.toString()).minus(r.reservedInches.toString());
+    const [received, sold] = productIds.length ? await Promise.all([this.receivedTotals(ctx.shopId, productIds), this.soldTotals(ctx.shopId, productIds)]) : [new Map(), new Map()];
+
+    const mapped = page.map((r) => {
+      const key = `${r.branchId}:${r.productId}`;
+      const unitInches = table.byCode(r.product.priceUnitCode)?.inchesPerUnit;
+      const onHand = D(r.onHandInches.toString());
+      const avail = onHand.minus(r.reservedInches.toString());
       const threshold = D((r.product.lowStockThresholdInches ?? settings.defaultLowStockInches).toString());
+      const s = sold.get(key);
       return {
         id: r.id,
         branch: r.branch,
-        onHandInches: r.onHandInches.toFixed(4),
+        product: { id: r.product.id, name: r.product.name, sku: r.product.sku },
+        priceUnitCode: r.product.priceUnitCode,
+        /** Total fabric ever added to this branch (inches). */
+        totalReceivedInches: D(received.get(key) ?? '0').toFixed(4),
+        /** Net sold length (POS + confirmed online orders, excl. cancelled) (inches). */
+        soldInches: D(s?.inches ?? '0').toFixed(4),
+        onHandInches: onHand.toFixed(4),
+        /** Held for pending online orders; shown as a note, not a column. */
         reservedInches: r.reservedInches.toFixed(4),
         availableInches: avail.toFixed(4),
-        availableYards: avail.div(36).toFixed(settings.lengthDisplayPrecision),
         lowStockThresholdInches: threshold.toFixed(4),
         lowStock: avail.lessThan(threshold),
-        product: { id: r.product.id, name: r.product.name, sku: r.product.sku },
-        /** Current unit purchase price, per the product's price unit (e.g. per yard). Null = not set. */
+        /** Per the product's price unit (e.g. per yard). */
         purchasePrice: r.product.purchaseRate ? D(r.product.purchaseRate.toString()).toFixed(2) : null,
-        priceUnitCode: r.product.priceUnitCode,
-        /** On hand × current purchase price, rounded once to 2 dp. Null when no purchase price is set. */
-        valuation: value,
+        sellingPrice: D(r.product.sellingRate.toString()).toFixed(2),
+        /** On hand × current selling price. */
+        valuation: stockValue(onHand.toString(), r.product.sellingRate.toString(), unitInches),
+        /** Total fabric × current purchase price (total cost of stock); null when no purchase price. */
+        totalPurchaseValue: r.product.purchaseRate
+          ? stockValue(D(received.get(key) ?? '0').toString(), r.product.purchaseRate.toString(), unitInches)
+          : null,
+        /** Realized profit from sold lines; null when some sold line has no cost basis at all. */
+        totalProfit: s && s.uncosted > 0 ? null : round(D(s?.profit ?? '0'), 2).toFixed(2),
+        uncostedSoldLines: s?.uncosted ?? 0,
       };
     });
     const items = q.lowStockOnly ? mapped.filter((m) => m.lowStock) : mapped;
     return { items, nextCursor: rows.length > q.limit ? rows[q.limit - 1]!.id : null };
+  }
+
+  /** Σ fabric added per branch × product from the append-only ledger. */
+  private async receivedTotals(shopId: string, productIds: string[]): Promise<Map<string, string>> {
+    const rows = await this.prisma.$queryRaw<Array<{ branchId: string; productId: string; inches: unknown }>>`
+      SELECT "branchId", "productId",
+             coalesce(sum(CASE WHEN type::text = ANY(${[...RECEIVED_IN]}::text[]) THEN "deltaOnHandInches"
+                               WHEN type = 'PURCHASE_CANCEL_OUT' THEN "deltaOnHandInches" ELSE 0 END), 0) AS inches
+      FROM stock_movements
+      WHERE "shopId" = ${shopId}::uuid AND "productId" = ANY(${productIds}::uuid[])
+      GROUP BY "branchId", "productId"`;
+    return new Map(rows.map((r) => [`${r.branchId}:${r.productId}`, String(r.inches)]));
+  }
+
+  /**
+   * Sold length and realized profit per branch × product.
+   * Sold amount = line total − line tax (discounts already applied; invoice discount allocated per line),
+   * pro-rated for returned length.
+   * Cost = sold inches × (recorded cost per inch, else current purchase price ÷ inches per price unit).
+   */
+  private async soldTotals(shopId: string, productIds: string[]): Promise<Map<string, { inches: string; profit: string; uncosted: number }>> {
+    const rows = await this.prisma.$queryRaw<Array<{ branchId: string; productId: string; inches: unknown; profit: unknown; uncosted: bigint }>>`
+      WITH lines AS (
+        SELECT sa."branchId", si."productId", si."totalLengthInches" - si."returnedInches" AS inches,
+               (si."lineTotal" - si."taxAmount") * (si."totalLengthInches" - si."returnedInches") / nullif(si."totalLengthInches", 0) AS amount,
+               si."costPerInch" AS recorded
+        FROM sale_items si JOIN sales sa ON sa.id = si."saleId"
+        WHERE sa."shopId" = ${shopId}::uuid AND si."productId" = ANY(${productIds}::uuid[])
+          AND sa.status IN ('COMPLETED','PARTIALLY_RETURNED','RETURNED')
+        UNION ALL
+        SELECT o."fulfilmentBranchId", oi."productId", oi."quantityInches" - oi."returnedInches",
+               (oi."lineTotal" - oi."taxAmount") * (oi."quantityInches" - oi."returnedInches") / nullif(oi."quantityInches", 0), oi."costPerInch"
+        FROM online_order_items oi JOIN online_orders o ON o.id = oi."orderId"
+        WHERE o."shopId" = ${shopId}::uuid AND oi."productId" = ANY(${productIds}::uuid[])
+          AND o."confirmedAt" IS NOT NULL AND o.status NOT IN ('CANCELLED','REJECTED')
+      ), priced AS (
+        SELECT l.*, coalesce(nullif(l.recorded, 0),
+                 CASE WHEN p."purchaseRate" > 0 AND mu."inchesPerUnit" > 0 THEN p."purchaseRate" / mu."inchesPerUnit" END) AS cost
+        FROM lines l
+        JOIN products p ON p.id = l."productId"
+        LEFT JOIN measurement_units mu ON mu."shopId" = p."shopId" AND mu.code = p."priceUnitCode" AND mu."isActive"
+      )
+      SELECT "branchId", "productId", sum(inches) AS inches,
+             coalesce(sum(coalesce(amount, 0) - inches * coalesce(cost, 0)), 0) AS profit,
+             count(*) FILTER (WHERE cost IS NULL) AS uncosted
+      FROM priced GROUP BY "branchId", "productId"`;
+    return new Map(rows.map((r) => [`${r.branchId}:${r.productId}`, { inches: String(r.inches), profit: String(r.profit), uncosted: Number(r.uncosted) }]));
   }
 
   async ledger(ctx: ShopContext, productId: string, q: { branchId?: string; cursor?: string; limit: number }) {
