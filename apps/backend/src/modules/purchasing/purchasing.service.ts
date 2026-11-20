@@ -7,7 +7,7 @@ import { AppError, notFound } from '../../common/errors/app-error';
 import { PrismaService, Tx } from '../../common/prisma/prisma.service';
 import { DocumentSequenceService } from '../../common/sequences/document-sequence.service';
 import { ShopContext } from '../../common/tenancy/shop-context';
-import { StockService } from '../inventory/stock.service';
+import { COST_DP, StockService } from '../inventory/stock.service';
 import { UnitsService } from '../measurement/units.service';
 
 type CreatePurchase = z.infer<typeof schemas.createPurchaseSchema>;
@@ -163,7 +163,7 @@ export class PurchasingService {
           unitCost: l.item.unitCost,
           discountAmount: discAlloc[i]!.toFixed(dp),
           lineTotal: l.lineTotal.toFixed(dp),
-          costPerInch: landed.div(l.measured.inches).toDecimalPlaces(6).toFixed(6),
+          costPerInch: landed.div(l.measured.inches).toDecimalPlaces(COST_DP).toFixed(COST_DP),
         };
       }),
     });

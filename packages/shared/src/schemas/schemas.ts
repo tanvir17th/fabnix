@@ -33,6 +33,19 @@ export const slugSchema = z
   .regex(/^[a-z0-9](?:[a-z0-9-]{1,58})[a-z0-9]$/, { message: 'invalid_slug' })
   .refine((s) => !s.includes('--'), { message: 'invalid_slug' });
 
+/**
+ * PATCH-style schema from a create schema: every field optional and NO
+ * defaults applied. Plain `.partial()` keeps Zod defaults, so an edit that only
+ * sends `purchaseRate` would also reset `priceUnitCode` to YARD (and similar
+ * for currency, payment-method switches and delivery fees).
+ */
+export function updateOf<T extends z.ZodRawShape>(schema: z.ZodObject<T>) {
+  const shape = Object.fromEntries(
+    Object.entries(schema.shape).map(([k, v]) => [k, v instanceof z.ZodDefault ? (v.unwrap() as z.ZodType) : v]),
+  );
+  return z.object(shape).partial() as unknown as ReturnType<z.ZodObject<T>['partial']>;
+}
+
 export const paginationQuery = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
@@ -125,7 +138,7 @@ export const createShopSchema = z.object({
   defaultLanguage: languageSchema.default('bn'),
   businessCategory: z.string().trim().max(80).optional(),
 });
-export const updateShopSchema = createShopSchema.omit({ code: true }).partial();
+export const updateShopSchema = updateOf(createShopSchema.omit({ code: true }));
 
 export const updateShopSettingsSchema = z
   .object({
@@ -196,7 +209,7 @@ export const paymentMethodSchema = z.object({
   availableInPos: z.boolean().default(true),
   availableOnline: z.boolean().default(false),
 });
-export const updatePaymentMethodSchema = paymentMethodSchema.partial().extend({ isActive: z.boolean().optional() });
+export const updatePaymentMethodSchema = updateOf(paymentMethodSchema).extend({ isActive: z.boolean().optional() });
 
 // ---------------------------------------------------------------------------
 // Measurement units
@@ -261,8 +274,7 @@ export const createProductSchema = z.object({
   orderStepInches: decimalString(4).nullable().optional(),
   availableInPos: z.boolean().default(true),
 });
-export const updateProductSchema = createProductSchema
-  .partial()
+export const updateProductSchema = updateOf(createProductSchema)
   .extend({ status: z.enum(['ACTIVE', 'INACTIVE', 'ARCHIVED']).optional() });
 
 export const publishProductSchema = z.object({ published: z.boolean() });
@@ -396,7 +408,7 @@ export const deliveryOptionSchema = z.object({
   estimatedDaysMin: z.number().int().min(0).max(60).optional(),
   estimatedDaysMax: z.number().int().min(0).max(60).optional(),
 });
-export const updateDeliveryOptionSchema = deliveryOptionSchema.partial().extend({ isActive: z.boolean().optional() });
+export const updateDeliveryOptionSchema = updateOf(deliveryOptionSchema).extend({ isActive: z.boolean().optional() });
 
 export const publicProductQuery = paginationQuery.extend({
   q: z.string().trim().max(100).optional(),

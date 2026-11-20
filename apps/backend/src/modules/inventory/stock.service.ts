@@ -36,6 +36,8 @@ export interface MovementInput {
 }
 
 const LEN = 4;
+/** Decimal places for per-inch costs (Decimal(18,10)); 6 dp caused cent-level valuation drift. */
+export const COST_DP = 10;
 
 export const available = (s: LockedStock): Decimal => s.onHand.minus(s.reserved);
 
@@ -123,11 +125,11 @@ export class StockService {
     if (m.unitCostPerInch !== undefined && dOn.greaterThan(0)) {
       const cost = D(m.unitCostPerInch);
       const base = Decimal.max(stock.onHand, ZERO);
-      avg = base.plus(dOn).isZero() ? cost : base.times(avg).plus(dOn.times(cost)).div(base.plus(dOn)).toDecimalPlaces(6);
+      avg = base.plus(dOn).isZero() ? cost : base.times(avg).plus(dOn.times(cost)).div(base.plus(dOn)).toDecimalPlaces(COST_DP);
     } else if (m.removeCostPerInch !== undefined && dOn.isNegative()) {
       const remaining = stock.onHand.plus(dOn);
       if (remaining.greaterThan(0)) {
-        avg = Decimal.max(stock.onHand.times(avg).plus(dOn.times(D(m.removeCostPerInch))).div(remaining), ZERO).toDecimalPlaces(6);
+        avg = Decimal.max(stock.onHand.times(avg).plus(dOn.times(D(m.removeCostPerInch))).div(remaining), ZERO).toDecimalPlaces(COST_DP);
       }
     }
 
@@ -135,7 +137,7 @@ export class StockService {
       UPDATE inventory
       SET "onHandInches" = ${newOnHand.toFixed(LEN)}::numeric,
           "reservedInches" = ${newReserved.toFixed(LEN)}::numeric,
-          "avgCostPerInch" = ${avg.toFixed(6)}::numeric,
+          "avgCostPerInch" = ${avg.toFixed(COST_DP)}::numeric,
           "lastMovementAt" = now(), version = version + 1, "updatedAt" = now()
       WHERE id = ${stock.inventoryId}::uuid`;
 
@@ -149,7 +151,7 @@ export class StockService {
         deltaReservedInches: dRes.toFixed(LEN),
         onHandAfterInches: newOnHand.toFixed(LEN),
         reservedAfterInches: newReserved.toFixed(LEN),
-        unitCostPerInch: m.unitCostPerInch !== undefined ? D(m.unitCostPerInch).toFixed(6) : dOn.isNegative() ? stock.avgCostPerInch.toFixed(6) : undefined,
+        unitCostPerInch: m.unitCostPerInch !== undefined ? D(m.unitCostPerInch).toFixed(COST_DP) : dOn.isNegative() ? stock.avgCostPerInch.toFixed(COST_DP) : undefined,
         saleItemId: m.saleItemId,
         orderItemId: m.orderItemId,
         reservationId: m.reservationId,

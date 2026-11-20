@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { D, ErrorCode, ShopPermission, schemas } from '@fabnix/shared';
+import { D, DecimalInput, ErrorCode, ShopPermission, round, schemas } from '@fabnix/shared';
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
@@ -7,7 +7,18 @@ import { AppError, notFound } from '../../common/errors/app-error';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { ShopContext } from '../../common/tenancy/shop-context';
 import { UnitsService } from '../measurement/units.service';
-import { StockService, available } from './stock.service';
+import { COST_DP, StockService, available } from './stock.service';
+
+/**
+ * Stock value = on-hand length in price units × current unit purchase price
+ * (e.g. 6,000 yd × ৳80 = ৳480,000.00). Computed from the per-unit price with
+ * exact decimals and rounded ONCE — never via a rounded per-inch cost, which
+ * drifted (6,000 yd × 70/36 at 6 dp gave 419,999.90).
+ */
+export function stockValue(onHandInches: string, purchaseRate: string | null, priceUnitInches: DecimalInput | undefined): string | null {
+  if (!purchaseRate || !priceUnitInches || D(purchaseRate).isZero()) return null;
+  return round(D(onHandInches).div(D(priceUnitInches)).times(purchaseRate), 2).toFixed(2);
+}
 
 @Injectable()
 export class InventoryService {
@@ -32,25 +43,31 @@ export class InventoryService {
     };
     const rows = await this.prisma.inventory.findMany({
       where,
-      include: { product: { select: { id: true, name: true, sku: true, priceUnitCode: true, lowStockThresholdInches: true } }, branch: { select: { id: true, name: true } } },
+      include: { product: { select: { id: true, name: true, sku: true, priceUnitCode: true, purchaseRate: true, lowStockThresholdInches: true } }, branch: { select: { id: true, name: true } } },
       orderBy: { id: 'asc' },
       take: q.limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
     });
+    const table = await this.units.table(ctx.shopId, 'ANY');
     const mapped = rows.slice(0, q.limit).map((r) => {
+      const value = stockValue(r.onHandInches.toString(), r.product.purchaseRate?.toString() ?? null, table.byCode(r.product.priceUnitCode)?.inchesPerUnit);
       const avail = D(r.onHandInches.toString()).minus(r.reservedInches.toString());
       const threshold = D((r.product.lowStockThresholdInches ?? settings.defaultLowStockInches).toString());
       return {
         id: r.id,
         branch: r.branch,
-        product: { id: r.product.id, name: r.product.name, sku: r.product.sku },
         onHandInches: r.onHandInches.toFixed(4),
         reservedInches: r.reservedInches.toFixed(4),
         availableInches: avail.toFixed(4),
         availableYards: avail.div(36).toFixed(settings.lengthDisplayPrecision),
         lowStockThresholdInches: threshold.toFixed(4),
         lowStock: avail.lessThan(threshold),
-        valuation: D(r.onHandInches.toString()).times(r.avgCostPerInch.toString()).toFixed(2),
+        product: { id: r.product.id, name: r.product.name, sku: r.product.sku },
+        /** Current unit purchase price, per the product's price unit (e.g. per yard). Null = not set. */
+        purchasePrice: r.product.purchaseRate ? D(r.product.purchaseRate.toString()).toFixed(2) : null,
+        priceUnitCode: r.product.priceUnitCode,
+        /** On hand × current purchase price, rounded once to 2 dp. Null when no purchase price is set. */
+        valuation: value,
       };
     });
     const items = q.lowStockOnly ? mapped.filter((m) => m.lowStock) : mapped;
@@ -95,7 +112,7 @@ export class InventoryService {
       const mv = await this.stock.apply(tx, s, {
         type: 'OPENING',
         deltaOnHand: measured.inches,
-        unitCostPerInch: costPerInch?.toDecimalPlaces(6),
+        unitCostPerInch: costPerInch?.toDecimalPlaces(COST_DP),
         actorUserId: ctx.userId,
         reason: 'opening_stock',
       });

@@ -24,7 +24,7 @@ import { PrismaService, Tx } from '../../common/prisma/prisma.service';
 import { DocumentSequenceService } from '../../common/sequences/document-sequence.service';
 import { ShopContext } from '../../common/tenancy/shop-context';
 import type { AuthUser } from '../../common/auth/auth.decorators';
-import { StockService } from '../inventory/stock.service';
+import { COST_DP, StockService } from '../inventory/stock.service';
 import { UnitsService } from '../measurement/units.service';
 import { policySnapshot, pricingPolicy } from '../sales/pricing-policy';
 import { shopSnapshot } from '../sales/sales.service';
@@ -257,7 +257,7 @@ export class OrdersService {
           taxRate: r.taxRate,
           taxAmount: r.taxAmount,
           lineTotal: r.lineTotal,
-          costPerInch: stocks.get(p.id)!.avgCostPerInch.toFixed(6),
+          costPerInch: stocks.get(p.id)!.avgCostPerInch.toFixed(COST_DP),
         };
       }),
     });

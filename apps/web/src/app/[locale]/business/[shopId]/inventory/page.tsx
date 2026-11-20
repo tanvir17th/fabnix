@@ -6,6 +6,7 @@ import type { MeasurementComponent } from '@fabnix/shared';
 import { LengthSummary, MeasurementInput, evaluate, useUnitLabel } from '@/components/measurement';
 import { useShop } from '@/components/shop-context';
 import { Button, Checkbox, ErrorNote, Field, Input, Loading, Modal, PageHeader, Select, Td, Table, Textarea, Badge } from '@/components/ui';
+import { Link } from '@/i18n/navigation';
 import { useAuth } from '@/lib/auth';
 import { useFormat } from '@/lib/format';
 import { useAction, useApi, useDebounced } from '@/lib/hooks';
@@ -20,7 +21,11 @@ interface Row {
   availableInches: string;
   lowStockThresholdInches: string;
   lowStock: boolean;
-  valuation: string;
+  /** Unit purchase price per `priceUnitCode` (e.g. per yard); null = not set on the product. */
+  purchasePrice: string | null;
+  priceUnitCode: string;
+  /** On hand × purchase price (server-computed, exact decimals); null when no purchase price. */
+  valuation: string | null;
 }
 interface Movement {
   id: string;
@@ -41,7 +46,7 @@ export default function InventoryPage() {
   const tc = useTranslations('common');
   const f = useFormat();
   const unitLabel = useUnitLabel();
-  const { shopId, can, access } = useShop();
+  const { shopId, can, access, base } = useShop();
   const { call } = useAuth();
   const [q, setQ] = useState('');
   const [lowOnly, setLowOnly] = useState(false);
@@ -87,7 +92,7 @@ export default function InventoryPage() {
       {!list.data ? (
         <Loading />
       ) : (
-        <Table head={[t('product'), t('branch'), t('onHand'), t('reserved'), t('available'), t('valuation'), '']} empty={!list.data.items.length}>
+        <Table head={[t('product'), t('branch'), t('onHand'), t('reserved'), t('available'), t('purchasePrice'), t('valuation'), '']} empty={!list.data.items.length}>
           {list.data.items.map((r) => (
             <tr key={r.id}>
               <Td>
@@ -102,7 +107,23 @@ export default function InventoryPage() {
               <Td className="tabular">{f.yards(r.onHandInches)} {unitLabel({ code: 'YARD' })}</Td>
               <Td className="tabular text-muted">{f.yards(r.reservedInches)}</Td>
               <Td className={`tabular font-medium ${r.lowStock ? 'text-warning' : ''}`}>{f.yards(r.availableInches)}</Td>
-              <Td className="tabular">{f.money(r.valuation, access.shop.currency)}</Td>
+              <Td className="tabular whitespace-nowrap">
+                {r.purchasePrice ? (
+                  <>
+                    {f.money(r.purchasePrice, access.shop.currency)}
+                    <span className="text-xs text-muted"> / {unitLabel({ code: r.priceUnitCode })}</span>
+                  </>
+                ) : can('catalog.manage') ? (
+                  <Link href={`${base}/products/${r.product.id}`} className="text-xs text-accent-ink underline">
+                    {t('setPurchasePrice')}
+                  </Link>
+                ) : (
+                  <span className="text-muted">—</span>
+                )}
+              </Td>
+              <Td className="tabular whitespace-nowrap" title={r.valuation ? undefined : t('noPurchasePrice')}>
+                {r.valuation ? f.money(r.valuation, access.shop.currency) : <span className="text-muted">—</span>}
+              </Td>
               <Td>
                 <div className="flex justify-end gap-1">
                   <Button size="sm" variant="ghost" onClick={() => setLedgerFor(r)}>

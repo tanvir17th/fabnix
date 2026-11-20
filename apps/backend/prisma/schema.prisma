@@ -1053,7 +1053,7 @@ model Inventory {
   onHandInches     Decimal  @default(0) @db.Decimal(14, 4)
   reservedInches   Decimal  @default(0) @db.Decimal(14, 4)
   /// Moving-average cost per inch for valuation (FR-033).
-  avgCostPerInch   Decimal  @default(0) @db.Decimal(18, 6)
+  avgCostPerInch   Decimal  @default(0) @db.Decimal(18, 10)
   lastMovementAt   DateTime? @db.Timestamptz(3)
   /// Optimistic version counter for diagnostics; correctness relies on row locks.
   version          Int      @default(0)
@@ -1082,7 +1082,7 @@ model StockMovement {
   deltaReservedInches Decimal           @default(0) @db.Decimal(14, 4)
   onHandAfterInches   Decimal           @db.Decimal(14, 4)
   reservedAfterInches Decimal           @db.Decimal(14, 4)
-  unitCostPerInch     Decimal?          @db.Decimal(18, 6)
+  unitCostPerInch     Decimal?          @db.Decimal(18, 10)
   // Typed references (at most a few are set per row; see CHECK in constraints.sql)
   saleItemId          String?           @db.Uuid
   orderItemId         String?           @db.Uuid
@@ -1401,7 +1401,7 @@ model SaleItem {
   taxRate            Decimal      @default(0) @db.Decimal(7, 4)
   taxAmount          Decimal      @default(0) @db.Decimal(14, 2)
   lineTotal          Decimal      @db.Decimal(14, 2)
-  costPerInch        Decimal?     @db.Decimal(18, 6)
+  costPerInch        Decimal?     @db.Decimal(18, 10)
   returnedInches     Decimal      @default(0) @db.Decimal(14, 4)
   createdAt          DateTime     @default(now()) @db.Timestamptz(3)
 
@@ -1581,7 +1581,7 @@ model PurchaseItem {
   taxAmount          Decimal  @default(0) @db.Decimal(14, 2)
   lineTotal          Decimal  @db.Decimal(14, 2)
   /// Landed cost per inch used for moving-average valuation.
-  costPerInch        Decimal  @db.Decimal(18, 6)
+  costPerInch        Decimal  @db.Decimal(18, 10)
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
 
   shop           Shop            @relation(fields: [shopId], references: [id], onDelete: Restrict)
@@ -1923,7 +1923,7 @@ model OnlineOrderItem {
   taxRate            Decimal  @default(0) @db.Decimal(7, 4)
   taxAmount          Decimal  @default(0) @db.Decimal(14, 2)
   lineTotal          Decimal  @db.Decimal(14, 2)
-  costPerInch        Decimal? @db.Decimal(18, 6)
+  costPerInch        Decimal? @db.Decimal(18, 10)
   returnedInches     Decimal  @default(0) @db.Decimal(14, 4)
   createdAt          DateTime @default(now()) @db.Timestamptz(3)
 

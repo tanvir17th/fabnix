@@ -21,7 +21,7 @@ import { AppError, notFound } from '../../common/errors/app-error';
 import { PrismaService, Tx } from '../../common/prisma/prisma.service';
 import { DocumentSequenceService } from '../../common/sequences/document-sequence.service';
 import { ShopContext } from '../../common/tenancy/shop-context';
-import { StockService } from '../inventory/stock.service';
+import { COST_DP, StockService } from '../inventory/stock.service';
 import { UnitsService } from '../measurement/units.service';
 import { policySnapshot, pricingPolicy } from './pricing-policy';
 
@@ -218,7 +218,7 @@ export class SalesService {
           taxRate: r.taxRate,
           taxAmount: r.taxAmount,
           lineTotal: r.lineTotal,
-          costPerInch: stocks.get(p.id)!.avgCostPerInch.toFixed(6),
+          costPerInch: stocks.get(p.id)!.avgCostPerInch.toFixed(COST_DP),
         };
       }),
     });

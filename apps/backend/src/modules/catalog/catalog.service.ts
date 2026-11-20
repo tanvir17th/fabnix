@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { ErrorCode, schemas } from '@fabnix/shared';
+import { D, DecimalInput, ErrorCode, schemas } from '@fabnix/shared';
+import { COST_DP } from '../inventory/stock.service';
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client';
 import { AuditService } from '../../common/audit/audit.service';
@@ -12,6 +13,12 @@ import { slugify } from '../../common/crypto';
 import { UnitsService } from '../measurement/units.service';
 
 type CreateProduct = z.infer<typeof schemas.createProductSchema>;
+
+/** Per-price-unit purchase rate → cost per inch at storage precision; null when not set. */
+export function unitCostPerInch(purchaseRate: string | null | undefined, priceUnitInches: DecimalInput | undefined): string | null {
+  if (!purchaseRate || !priceUnitInches || D(purchaseRate).isZero()) return null;
+  return D(purchaseRate).div(D(priceUnitInches)).toDecimalPlaces(COST_DP).toFixed(COST_DP);
+}
 
 @Injectable()
 export class CatalogService {
@@ -67,13 +74,17 @@ export class CatalogService {
         const c = await tx.category.findFirst({ where: { id: dto.categoryId, shopId: ctx.shopId } });
         if (!c) throw notFound('category');
       }
-      (await this.units.table(ctx.shopId, 'ANY', tx)).priceUnit(dto.priceUnitCode);
+      const priceUnit = (await this.units.table(ctx.shopId, 'ANY', tx)).priceUnit(dto.priceUnitCode);
       const product = await tx.product.create({
         data: { ...this.productData(dto), shopId: ctx.shopId, slug: dto.slug ?? slugify(dto.name, 'fabric'), createdById: ctx.userId },
       });
       // Eager zero-balance inventory rows per branch keep the stock lock path insert-free.
       const branches = await tx.branch.findMany({ where: { shopId: ctx.shopId }, select: { id: true } });
-      await tx.inventory.createMany({ data: branches.map((b) => ({ shopId: ctx.shopId, branchId: b.id, productId: product.id })), skipDuplicates: true });
+      const costPerInch = unitCostPerInch(product.purchaseRate?.toString(), priceUnit.inchesPerUnit);
+      await tx.inventory.createMany({
+        data: branches.map((b) => ({ shopId: ctx.shopId, branchId: b.id, productId: product.id, ...(costPerInch ? { avgCostPerInch: costPerInch } : {}) })),
+        skipDuplicates: true,
+      });
       await this.audit.log({ shopId: ctx.shopId, actorUserId: ctx.userId, actorType: 'SHOPKEEPER', action: 'product.create', targetType: 'product', targetId: product.id, after: product }, tx);
       return product;
     });
@@ -87,7 +98,8 @@ export class CatalogService {
         const c = await tx.category.findFirst({ where: { id: dto.categoryId, shopId: ctx.shopId } });
         if (!c) throw notFound('category');
       }
-      if (dto.priceUnitCode) (await this.units.table(ctx.shopId, 'ANY', tx)).priceUnit(dto.priceUnitCode);
+      const table = await this.units.table(ctx.shopId, 'ANY', tx);
+      if (dto.priceUnitCode) table.priceUnit(dto.priceUnitCode);
       const archiving = dto.status === 'ARCHIVED' && before.status !== 'ARCHIVED';
       const after = await tx.product.update({
         where: { id },
@@ -100,6 +112,28 @@ export class CatalogService {
       });
       // Rate/name changes never touch sale_items/online_order_items snapshots (FR-021, FR-049).
       await this.audit.log({ shopId: ctx.shopId, actorUserId: ctx.userId, actorType: 'SHOPKEEPER', action: 'product.update', targetType: 'product', targetId: id, before, after }, tx);
+
+      // Stock is valued at the product's current purchase price: when it is set or
+      // changed (or the price unit changes), revalue this product's stock in the
+      // same transaction so the Stock page and COGS reflect it immediately.
+      const rateChanged = (before.purchaseRate?.toString() ?? null) !== (after.purchaseRate?.toString() ?? null) || before.priceUnitCode !== after.priceUnitCode;
+      const costPerInch = unitCostPerInch(after.purchaseRate?.toString(), table.byCode(after.priceUnitCode)?.inchesPerUnit);
+      if (rateChanged && costPerInch) {
+        const revalued = await tx.inventory.updateMany({ where: { shopId: ctx.shopId, productId: id }, data: { avgCostPerInch: costPerInch } });
+        await this.audit.log(
+          {
+            shopId: ctx.shopId,
+            actorUserId: ctx.userId,
+            actorType: 'SHOPKEEPER',
+            action: 'stock.revalue',
+            targetType: 'product',
+            targetId: id,
+            before: { purchaseRate: before.purchaseRate?.toString() ?? null, priceUnitCode: before.priceUnitCode },
+            after: { purchaseRate: after.purchaseRate?.toString() ?? null, priceUnitCode: after.priceUnitCode, inventoryRows: revalued.count },
+          },
+          tx,
+        );
+      }
       return after;
     });
   }

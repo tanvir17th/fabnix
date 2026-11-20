@@ -116,6 +116,18 @@ test('shopkeeper onboards: account → shop → Gira 2.25″ → fabric with pho
   await p.getByRole('dialog').getByLabel(bn.measure.quick).fill('২০ গজ');
   await p.getByRole('dialog').getByRole('button', { name: bn.common.save }).click();
   await expect(p.getByRole('cell', { name: /২০.*গজ|20.*গজ/ }).first()).toBeVisible();
+
+  // Created without a purchase price → no fake ৳0.00 value; adding the price later revalues stock.
+  const stockRow = p.getByRole('row', { name: /সুতি লন/ });
+  await expect(stockRow.getByRole('link', { name: bn.inventory.setPurchasePrice })).toBeVisible();
+  await stockRow.getByRole('link', { name: bn.inventory.setPurchasePrice }).click();
+  await p.getByLabel(bn.products.purchaseRate, { exact: true }).fill('120');
+  await p.getByRole('button', { name: bn.common.save }).click();
+  await expect(p.getByText(bn.common.saved)).toBeVisible();
+  await p.goto(`/bn/business/${shopId}/inventory`);
+  await expect(stockRow.getByRole('cell', { name: /১২০\.০০.*গজ/ })).toBeVisible(); // purchase price per yard
+  await expect(stockRow.getByRole('cell', { name: '২,৪০০.০০৳' })).toBeVisible(); // 20 yd × ৳120
+  await shot(p, '02-stock-valuation');
 });
 
 test('POS: “৫ গজ ৪ গিরা” at ৳200/yd totals ৳1,050 (AC-006); invoice language is independent (NFR-L10N-006)', async () => {

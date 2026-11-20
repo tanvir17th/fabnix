@@ -494,7 +494,7 @@
     "onHand": "On hand",
     "reserved": "Reserved",
     "available": "Available",
-    "valuation": "Value",
+    "valuation": "Stock value",
     "low": "Low",
     "ledger": "Ledger",
     "opening": "Opening stock",
@@ -506,7 +506,10 @@
     "changeReserved": "Reserved Δ",
     "balance": "Balance (yd)",
     "reason": "Reason",
-    "ledgerNote": "Ledger entries are permanent; corrections are new entries."
+    "ledgerNote": "Ledger entries are permanent; corrections are new entries.",
+    "purchasePrice": "Purchase price",
+    "setPurchasePrice": "Set purchase price",
+    "noPurchasePrice": "No purchase price set — value cannot be calculated."
   },
   "movement": {
     "OPENING": "Opening stock",
