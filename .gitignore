@@ -12,3 +12,5 @@ apps/backend/storage/
 apps/web/.next/
 apps/web/test-results/
 apps/web/playwright-report/
+.vercel
+.env*

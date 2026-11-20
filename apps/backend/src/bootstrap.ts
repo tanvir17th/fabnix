@@ -15,7 +15,7 @@ import { StorageService } from './common/storage/storage.service';
 export function configureApp(app: INestApplication): void {
   const config = app.get<AppConfig>(APP_CONFIG);
   const expressApp = app as NestExpressApplication;
-  if (config.trustProxy) expressApp.set('trust proxy', 1);
+  if (config.trustProxy) expressApp.set('trust proxy', config.trustProxy);
   expressApp.disable('x-powered-by');
 
   app.use(requestContextMiddleware);

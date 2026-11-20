@@ -5,6 +5,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/web/package.json apps/web/
+COPY apps/backend/package.json apps/backend/
 RUN npm ci --workspace @fabnix/web --workspace @fabnix/shared --include-workspace-root --ignore-scripts
 
 FROM deps AS build

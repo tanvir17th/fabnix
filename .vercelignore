@@ -1,0 +1,13 @@
+# Never upload secrets or local build/test output to Vercel.
+**/.env
+**/.env.*
+!**/.env.example
+**/node_modules
+**/.next
+**/dist
+**/coverage
+apps/backend/storage
+apps/backend/.tmp
+apps/web/test-results
+apps/web/playwright-report
+.vercel

@@ -35,7 +35,12 @@ const envSchema = z
     RESERVATION_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(60_000),
     MESSAGING_DRIVER: z.enum(['console']).default('console'),
     SWAGGER_ENABLED: bool.optional(),
-    TRUST_PROXY: bool.default(false),
+    /** false | true (=1 hop) | number of trusted proxy hops, e.g. 2 for Vercel → Railway → app. */
+    TRUST_PROXY: z
+      .union([z.boolean(), z.string()])
+      .default(false)
+      .transform((v) => (v === true || v === 'true' ? 1 : v === false || v === 'false' || v === '' ? 0 : Number(v)))
+      .refine((n) => Number.isInteger(n) && n >= 0 && n <= 5, { message: 'TRUST_PROXY must be true/false or a hop count 0-5' }),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production') {
@@ -67,7 +72,8 @@ export interface AppConfig {
   jobs: { enabled: boolean; reservationSweepIntervalMs: number };
   messagingDriver: 'console';
   swaggerEnabled: boolean;
-  trustProxy: boolean;
+  /** Number of trusted reverse-proxy hops (0 = none). */
+  trustProxy: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
