@@ -104,7 +104,7 @@ describe('back office: purchasing, expenses, reports, audit & admin', () => {
     const p = await owner().get(`/shops/${f.shopId}/reports/profit?from=${today}&to=${today}`);
     // revenue 600, COGS 72 in × 4 = 288, expenses 5000
     expect(p.body).toMatchObject({ revenue: '600.00', costOfGoodsSold: '288.00', grossProfit: '312.00', expenses: '5000.00', netProfit: '-4688.00', grossMarginPercent: '52.00' });
-    expect(p.body.basisKeys).toHaveLength(3);
+    expect(p.body.basisKeys).toEqual(['reports.profit.basis.revenue', 'reports.profit.basis.cogs', 'reports.profit.basis.fallback', 'reports.profit.basis.expenses']);
 
     const bad = await owner().get(`/shops/${f.shopId}/reports/sales?from=2020-01-01&to=2026-01-01`);
     expect(bad.status).toBe(400);

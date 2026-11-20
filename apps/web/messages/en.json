@@ -634,10 +634,13 @@
     "profit": {
       "basis": {
         "revenue": "Revenue = counter sales + confirmed online orders, excluding tax and delivery charges.",
-        "cogs": "Cost = length sold × average purchase cost per inch at the time of sale.",
-        "expenses": "Expenses = posted (not voided) expenses dated in this period."
+        "cogs": "Cost of fabric sold = length sold in the fabric’s price unit (e.g. yards) × its purchase price per that unit, using the cost recorded at the time of sale.",
+        "expenses": "Expenses = posted (not voided) expenses dated in this period. Gross profit = revenue − cost of fabric sold; net profit = gross profit − expenses.",
+        "fallback": "If no cost was recorded at the time of sale (purchase price not set yet), the fabric’s current purchase price is used."
       }
-    }
+    },
+    "uncostedLines": "{count, plural, one {# sold line has} other {# sold lines have}} no purchase price, so its cost is counted as 0 and profit is overstated. Set the purchase price on those fabrics.",
+    "estimatedCostLines": "{count, plural, one {# sold line uses} other {# sold lines use}} the fabric’s current purchase price because no cost was recorded at the time of sale."
   },
   "staff": {
     "title": "Staff & permissions",

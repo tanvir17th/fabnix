@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { D, ErrorCode, schemas } from '@fabnix/shared';
+import { D, ErrorCode, round, schemas } from '@fabnix/shared';
 import { z } from 'zod';
 import { Prisma } from '../../generated/prisma/client';
 import { AppError } from '../../common/errors/app-error';
@@ -177,21 +177,46 @@ export class ReportsService {
     const { timezone: tz, currency } = await this.tz(ctx.shopId);
     const { start, end } = this.bounds(q, tz);
     const [pos] = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
-      SELECT coalesce(sum(sa."grandTotal" - sa."taxTotal"), 0) AS revenue,
-             coalesce((SELECT sum(si."totalLengthInches" * coalesce(si."costPerInch", 0)) FROM sale_items si JOIN sales s2 ON s2.id = si."saleId"
-                       WHERE s2."shopId" = ${ctx.shopId}::uuid AND s2."soldAt" >= ${start} AND s2."soldAt" < ${end} AND s2.status IN ('COMPLETED','PARTIALLY_RETURNED','RETURNED')), 0) AS cogs
+      SELECT coalesce(sum(sa."grandTotal" - sa."taxTotal"), 0) AS revenue
       FROM sales sa WHERE sa."shopId" = ${ctx.shopId}::uuid AND sa."soldAt" >= ${start} AND sa."soldAt" < ${end} AND sa.status IN ('COMPLETED','PARTIALLY_RETURNED','RETURNED')`;
     const [web] = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
-      SELECT coalesce(sum(o.total - o."taxTotal" - o."deliveryFee"), 0) AS revenue,
-             coalesce((SELECT sum(oi."quantityInches" * coalesce(oi."costPerInch", 0)) FROM online_order_items oi JOIN online_orders o2 ON o2.id = oi."orderId"
-                       WHERE o2."shopId" = ${ctx.shopId}::uuid AND o2."confirmedAt" >= ${start} AND o2."confirmedAt" < ${end} AND o2.status NOT IN ('CANCELLED','REJECTED')), 0) AS cogs
+      SELECT coalesce(sum(o.total - o."taxTotal" - o."deliveryFee"), 0) AS revenue
       FROM online_orders o WHERE o."shopId" = ${ctx.shopId}::uuid AND o."confirmedAt" >= ${start} AND o."confirmedAt" < ${end} AND o.status NOT IN ('CANCELLED','REJECTED')`;
+    /*
+     * COGS per sold line = sold length (in the fabric's price unit, e.g. yards)
+     * × purchase price per that unit. The cost recorded on the line at sale time
+     * wins; a line sold with NO recorded cost (0/null, e.g. purchase price was
+     * not set yet) falls back to the fabric's CURRENT purchase price.
+     * length_inches × (rate ÷ inches_per_unit) ≡ (length_inches ÷ inches_per_unit) × rate.
+     */
+    const [cost] = await this.prisma.$queryRaw<Array<Record<string, unknown>>>`
+      WITH lines AS (
+        SELECT si."productId", si."totalLengthInches" AS inches, si."costPerInch" AS recorded
+        FROM sale_items si JOIN sales s2 ON s2.id = si."saleId"
+        WHERE s2."shopId" = ${ctx.shopId}::uuid AND s2."soldAt" >= ${start} AND s2."soldAt" < ${end}
+          AND s2.status IN ('COMPLETED','PARTIALLY_RETURNED','RETURNED')
+        UNION ALL
+        SELECT oi."productId", oi."quantityInches", oi."costPerInch"
+        FROM online_order_items oi JOIN online_orders o2 ON o2.id = oi."orderId"
+        WHERE o2."shopId" = ${ctx.shopId}::uuid AND o2."confirmedAt" >= ${start} AND o2."confirmedAt" < ${end}
+          AND o2.status NOT IN ('CANCELLED','REJECTED')
+      ), priced AS (
+        SELECT l.inches, nullif(l.recorded, 0) AS recorded,
+               CASE WHEN p."purchaseRate" > 0 AND mu."inchesPerUnit" > 0 THEN p."purchaseRate" / mu."inchesPerUnit" END AS current_cost
+        FROM lines l
+        JOIN products p ON p.id = l."productId"
+        LEFT JOIN measurement_units mu ON mu."shopId" = p."shopId" AND mu.code = p."priceUnitCode" AND mu."isActive"
+      )
+      SELECT coalesce(sum(inches * coalesce(recorded, current_cost, 0)), 0) AS cogs,
+             count(*) FILTER (WHERE recorded IS NULL AND current_cost IS NOT NULL) AS estimated_lines,
+             count(*) FILTER (WHERE recorded IS NULL AND current_cost IS NULL) AS uncosted_lines
+      FROM priced`;
     const exp = await this.prisma.expense.aggregate({
       where: { shopId: ctx.shopId, status: 'POSTED', expenseDate: { gte: new Date(q.from), lte: new Date(q.to) } },
       _sum: { amount: true },
     });
     const revenue = D(s(pos!.revenue)).plus(s(web!.revenue));
-    const cogs = D(s(pos!.cogs)).plus(s(web!.cogs)).toDecimalPlaces(2);
+    const cogs = round(D(s(cost!.cogs)), 2);
     const expenses = D(s(exp._sum.amount));
     const gross = revenue.minus(cogs);
     return {
@@ -203,7 +228,11 @@ export class ReportsService {
       expenses: expenses.toFixed(2),
       netProfit: gross.minus(expenses).toFixed(2),
       grossMarginPercent: revenue.isZero() ? '0.00' : gross.div(revenue).times(100).toFixed(2),
-      basisKeys: ['reports.profit.basis.revenue', 'reports.profit.basis.cogs', 'reports.profit.basis.expenses'],
+      /** Sold lines with no recorded cost, valued at the fabric's current purchase price. */
+      estimatedCostLines: Number(cost!.estimated_lines),
+      /** Sold lines with no recorded cost AND no purchase price — counted at 0; profit is overstated. */
+      uncostedLines: Number(cost!.uncosted_lines),
+      basisKeys: ['reports.profit.basis.revenue', 'reports.profit.basis.cogs', 'reports.profit.basis.fallback', 'reports.profit.basis.expenses'],
     };
   }
 

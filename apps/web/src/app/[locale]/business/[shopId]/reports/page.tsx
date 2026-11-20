@@ -24,6 +24,8 @@ interface Profit {
   expenses: string;
   netProfit: string;
   grossMarginPercent: string;
+  estimatedCostLines: number;
+  uncostedLines: number;
   basisKeys: string[];
 }
 interface ExpenseReport {
@@ -169,6 +171,12 @@ export default function ReportsPage() {
               <dt className="font-semibold">{t('netProfit')}</dt>
               <dd className="text-right font-semibold tabular">{f.money(profit.data.netProfit, cur)}</dd>
             </dl>
+            {profit.data.uncostedLines > 0 && (
+              <p className="mt-3 rounded-md bg-warning-soft px-3 py-2 text-sm text-warning" role="status">
+                {t('uncostedLines', { count: profit.data.uncostedLines })}
+              </p>
+            )}
+            {profit.data.estimatedCostLines > 0 && <p className="mt-2 text-xs text-muted">{t('estimatedCostLines', { count: profit.data.estimatedCostLines })}</p>}
             <ul className="mt-4 list-disc pl-5 text-xs text-muted">
               {profit.data.basisKeys.map((k) => (
                 <li key={k}>{tk(k)}</li>

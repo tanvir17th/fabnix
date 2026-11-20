@@ -120,6 +120,11 @@ export class CatalogService {
       const costPerInch = unitCostPerInch(after.purchaseRate?.toString(), table.byCode(after.priceUnitCode)?.inchesPerUnit);
       if (rateChanged && costPerInch) {
         const revalued = await tx.inventory.updateMany({ where: { shopId: ctx.shopId, productId: id }, data: { avgCostPerInch: costPerInch } });
+        // Past sale/order lines sold with NO recorded cost (price not set yet) get
+        // this cost so profit is right. Costs actually recorded are never rewritten.
+        const uncosted = { shopId: ctx.shopId, productId: id, OR: [{ costPerInch: null }, { costPerInch: 0 }] };
+        const saleLines = await tx.saleItem.updateMany({ where: uncosted, data: { costPerInch } });
+        const orderLines = await tx.onlineOrderItem.updateMany({ where: uncosted, data: { costPerInch } });
         await this.audit.log(
           {
             shopId: ctx.shopId,
@@ -129,7 +134,13 @@ export class CatalogService {
             targetType: 'product',
             targetId: id,
             before: { purchaseRate: before.purchaseRate?.toString() ?? null, priceUnitCode: before.priceUnitCode },
-            after: { purchaseRate: after.purchaseRate?.toString() ?? null, priceUnitCode: after.priceUnitCode, inventoryRows: revalued.count },
+            after: {
+              purchaseRate: after.purchaseRate?.toString() ?? null,
+              priceUnitCode: after.priceUnitCode,
+              inventoryRows: revalued.count,
+              backfilledSaleLines: saleLines.count,
+              backfilledOrderLines: orderLines.count,
+            },
           },
           tx,
         );
