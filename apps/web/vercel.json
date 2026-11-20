@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "cd ../.. && npm ci --workspace @fabnix/web --workspace @fabnix/shared --include-workspace-root",
+  "buildCommand": "cd ../.. && npm run build -w @fabnix/shared && npm run test -w @fabnix/web && npm run build -w @fabnix/web",
+  "outputDirectory": ".next",
+  "regions": ["bom1"]
+}

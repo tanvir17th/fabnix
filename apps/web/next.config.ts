@@ -1,7 +1,13 @@
 import type { NextConfig } from 'next';
 import createNextIntlPlugin from 'next-intl/plugin';
 
-const API_URL = process.env.API_URL ?? 'http://localhost:4000';
+// On Vercel (and any production build) the API origin must be explicit — the
+// rewrites below are fixed at build time, so a missing value would silently
+// point the live site at localhost.
+if (process.env.VERCEL === '1' && !process.env.API_URL) {
+  throw new Error('API_URL is not set. Add it in Vercel → Project → Settings → Environment Variables (e.g. https://api.yourdomain.com).');
+}
+const API_URL = (process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 /**
