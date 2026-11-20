@@ -19,7 +19,8 @@
     "remove": "Remove",
     "save": "Save",
     "saved": "Saved.",
-    "uploading": "Uploading…"
+    "uploading": "Uploading…",
+    "footer": "FABNIX · EST. 2026"
   },
   "nav": {
     "admin": "Admin console",
@@ -85,7 +86,9 @@
       "customer": "Customer",
       "business": "Shop / Business",
       "admin": "Platform admin"
-    }
+    },
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
   },
   "store": {
     "notFound": "This shop is not available.",

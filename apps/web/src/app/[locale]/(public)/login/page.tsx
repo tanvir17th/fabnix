@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { Button, Card, ErrorNote, Field, Input, Tabs } from '@/components/ui';
+import { Button, Card, ErrorNote, Field, Input, Tabs, PasswordInput } from '@/components/ui';
 import { Link, useRouter } from '@/i18n/navigation';
 import { useAuth } from '@/lib/auth';
 import { PORTAL_HOME, PORTAL_TYPE, Portal } from '@/lib/portals';
@@ -51,7 +51,7 @@ function LoginForm() {
             {(id) => <Input id={id} autoComplete="username" required value={identifier} onChange={(e) => setIdentifier(e.target.value)} />}
           </Field>
           <Field label={t('password')}>
-            {(id) => <Input id={id} type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}
+            {(id) => <PasswordInput id={id} autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />}
           </Field>
           <ErrorNote error={action.error} />
           {action.error?.code === 'ACCOUNT_NOT_VERIFIED' && (

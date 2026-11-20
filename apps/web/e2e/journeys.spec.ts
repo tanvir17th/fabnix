@@ -75,7 +75,7 @@ test('shopkeeper onboards: account → shop → Gira 2.25″ → fabric with pho
   await p.goto('/bn/register?portal=business');
   await p.getByLabel(bn.auth.fullName).fill(owner.name);
   await p.getByLabel(bn.auth.identifier).fill(owner.email);
-  await p.getByLabel(bn.auth.password).fill(owner.password);
+  await p.getByLabel(bn.auth.password, { exact: true }).fill(owner.password);
   await p.getByRole('button', { name: bn.auth.createAccount }).click();
   await expect(p).toHaveURL(/\/bn\/business$/);
 
@@ -190,7 +190,7 @@ test('customer: browse → Gira calculator → cart → checkout (AC-017…AC-02
   await p.goto('/bn/register?portal=customer');
   await p.getByLabel(bn.auth.fullName).fill(buyer.name);
   await p.getByLabel(bn.auth.identifier).fill(buyer.email);
-  await p.getByLabel(bn.auth.password).fill(buyer.password);
+  await p.getByLabel(bn.auth.password, { exact: true }).fill(buyer.password);
   await p.getByRole('button', { name: bn.auth.createAccount }).click();
   await expect(p).toHaveURL(/\/bn$/);
 
@@ -237,7 +237,7 @@ test('AC-001: switching to English is instant and follows the user to a new sess
   const { ctx, page } = await newPage(browser);
   await page.goto('/bn/login?portal=customer');
   await page.getByLabel(bn.auth.identifier).fill(buyer.email);
-  await page.getByLabel(bn.auth.password).fill(buyer.password);
+  await page.getByLabel(bn.auth.password, { exact: true }).fill(buyer.password);
   await page.getByRole('button', { name: bn.auth.login, exact: true }).click();
   await expect(page).toHaveURL(/\/en$/); // preferred language restored (NFR-L10N-002)
   await ctx.close();
@@ -247,7 +247,7 @@ test('Super Admin suspends the storefront with a reason; it disappears and is au
   const { ctx, page: p } = await newPage(browser);
   await p.goto('/bn/login?portal=admin');
   await p.getByLabel(bn.auth.identifier).fill(ADMIN.email);
-  await p.getByLabel(bn.auth.password).fill(ADMIN.password);
+  await p.getByLabel(bn.auth.password, { exact: true }).fill(ADMIN.password);
   await p.getByRole('button', { name: bn.auth.login, exact: true }).click();
   // The seeded admin's saved language is English → the console opens in English (BR-013).
   await expect(p).toHaveURL(/\/en\/admin$/);

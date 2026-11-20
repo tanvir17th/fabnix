@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { Button, Card, ErrorNote, Field, Input, Notice } from '@/components/ui';
+import { Button, Card, ErrorNote, Field, Input, Notice, PasswordInput } from '@/components/ui';
 import { useRouter } from '@/i18n/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAction } from '@/lib/hooks';
@@ -44,7 +44,7 @@ function ForgotForm() {
               <Notice tone="success">{t('resetSent')}</Notice>
               <Field label={t('code')}>{(id) => <Input id={id} inputMode="numeric" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value)} />}</Field>
               <Field label={t('newPassword')} hint={t('passwordHint')}>
-                {(id) => <Input id={id} type="password" minLength={8} required autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />}
+                {(id) => <PasswordInput id={id} minLength={8} required autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />}
               </Field>
             </>
           )}

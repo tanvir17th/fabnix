@@ -3,7 +3,7 @@
 import { useLocale, useTranslations } from 'next-intl';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
-import { Button, Card, ErrorNote, Field, Input, Notice, Tabs } from '@/components/ui';
+import { Button, Card, ErrorNote, Field, Input, Notice, Tabs, PasswordInput } from '@/components/ui';
 import { Link, useRouter } from '@/i18n/navigation';
 import { apiFetch } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -75,7 +75,7 @@ function RegisterForm() {
               {(id) => <Input id={id} required autoComplete="username" value={form.identifier} onChange={set('identifier')} />}
             </Field>
             <Field label={t('password')} hint={t('passwordHint')}>
-              {(id) => <Input id={id} type="password" required minLength={8} autoComplete="new-password" value={form.password} onChange={set('password')} />}
+              {(id) => <PasswordInput id={id} required minLength={8} autoComplete="new-password" value={form.password} onChange={set('password')} />}
             </Field>
             <ErrorNote error={register.error} />
             <Button type="submit" size="lg" pending={register.pending}>

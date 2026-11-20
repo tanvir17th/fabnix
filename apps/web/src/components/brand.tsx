@@ -24,7 +24,7 @@ export function Wordmark({ className }: { className?: string }) {
   );
 }
 
-/** Full raster logo (FN + wordmark + EST. MMXXV) for marketing surfaces. */
+/** Full raster logo (FN + wordmark) for marketing surfaces. */
 export function LogoImage({ size = 160 }: { size?: number }) {
-  return <Image src="/brand/fabnix-logo.jpg" alt="FABNIX — EST. MMXXV" width={size} height={size} priority className="rounded-lg" />;
+  return <Image src="/brand/fabnix-logo.jpg" alt="FABNIX · EST. 2026" width={size} height={size} priority className="rounded-lg" />;
 }
