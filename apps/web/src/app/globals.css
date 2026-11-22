@@ -77,11 +77,15 @@ body {
   /* NFR-L10N-009: generous line-height so Bangla conjuncts/matras never clip */
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /* Every number on every screen lines up, including ones inside sentences and captions. */
+  font-variant-numeric: tabular-nums;
 }
 
 :lang(bn) body {
   font-family: var(--font-bangla), var(--font-latin), ui-sans-serif, system-ui, sans-serif;
   line-height: 1.7;
+  /* macOS "antialiased" thins light-on-dark strokes, which hurts small Bangla digits. */
+  -webkit-font-smoothing: auto;
 }
 
 :focus-visible {
@@ -89,8 +93,15 @@ body {
   outline-offset: 2px;
 }
 
-.tabular {
-  font-variant-numeric: tabular-nums;
+/* In a layer so explicit utilities (font-semibold, text-xs…) on the same element still win. */
+@layer components {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  :lang(bn) .tabular {
+    font-weight: 500;
+  }
 }
 
 @media print {

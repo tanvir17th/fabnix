@@ -72,7 +72,7 @@ export default function ExpensesPage() {
         <Table head={[t('date'), t('category'), t('note'), t('by'), t('amount'), '']} empty={!list.data.items.length}>
           {list.data.items.map((e) => (
             <tr key={e.id} className={e.status !== 'POSTED' ? 'opacity-50' : undefined}>
-              <Td>{f.date(e.expenseDate)}</Td>
+              <Td className="tabular">{f.date(e.expenseDate)}</Td>
               <Td>{catName(e.category)}</Td>
               <Td className="text-sm">{e.note}</Td>
               <Td className="text-sm text-muted">{e.createdBy.fullName}</Td>

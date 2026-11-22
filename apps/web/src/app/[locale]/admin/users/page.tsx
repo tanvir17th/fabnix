@@ -66,7 +66,7 @@ export default function AdminUsers() {
                 <StatusBadge status={u.status} />
                 {u.suspendedReason && <span className="block text-xs text-muted">{u.suspendedReason}</span>}
               </Td>
-              <Td className="text-xs">{f.date(u.lastLoginAt, true)}</Td>
+              <Td className="tabular text-xs">{f.date(u.lastLoginAt, true)}</Td>
               <Td>
                 {u.id !== user?.id && u.type !== 'SUPER_ADMIN' && (
                   <Button size="sm" variant={u.status === 'SUSPENDED' ? 'secondary' : 'danger'} onClick={() => setTarget(u)}>

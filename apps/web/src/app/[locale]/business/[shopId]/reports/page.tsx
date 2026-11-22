@@ -98,7 +98,7 @@ export default function ReportsPage() {
                 <Table head={[t('day'), t('count'), t('gross'), t('discounts'), t('tax'), t('net'), t('paid'), t('due')]}>
                   {sales.data.pos.map((d) => (
                     <tr key={d.day}>
-                      <Td>{f.date(d.day)}</Td>
+                      <Td className="tabular">{f.date(d.day)}</Td>
                       <Td className="tabular">{f.digits(d.count)}</Td>
                       <Td className="tabular">{f.money(d.gross, cur)}</Td>
                       <Td className="tabular">{f.money(d.discounts, cur)}</Td>

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Hind_Siliguri, Plus_Jakarta_Sans } from 'next/font/google';
+import { Noto_Sans_Bengali, Plus_Jakarta_Sans } from 'next/font/google';
 import { notFound } from 'next/navigation';
 import { NextIntlClientProvider, hasLocale } from 'next-intl';
 import { getMessages, getTranslations, setRequestLocale } from 'next-intl/server';
@@ -8,8 +8,9 @@ import { AuthProvider } from '@/lib/auth';
 import '../globals.css';
 
 const latin = Plus_Jakarta_Sans({ subsets: ['latin'], variable: '--font-latin', display: 'swap' });
-// NFR-L10N-009: Bangla-capable face with correct conjunct shaping.
-const bangla = Hind_Siliguri({ subsets: ['bengali', 'latin'], weight: ['400', '500', '600', '700'], variable: '--font-bangla', display: 'swap' });
+// NFR-L10N-009: Bangla face with correct conjunct shaping. Noto Sans Bengali over Hind Siliguri because its
+// digits are equal-width (real tabular columns) and its ১ stays distinct at table sizes on dark backgrounds.
+const bangla = Noto_Sans_Bengali({ subsets: ['bengali', 'latin'], weight: ['400', '500', '600', '700'], variable: '--font-bangla', display: 'swap' });
 
 export function generateStaticParams() {
   return routing.locales.map((locale) => ({ locale }));

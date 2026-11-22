@@ -87,7 +87,7 @@ export default function CustomersPage() {
                       {s.invoiceNumber}
                     </Link>
                   </Td>
-                  <Td>{f.date(s.soldAt)}</Td>
+                  <Td className="tabular">{f.date(s.soldAt)}</Td>
                   <Td className="tabular">{f.money(s.grandTotal, cur)}</Td>
                   <Td className="tabular">{f.money(s.dueAmount, cur)}</Td>
                   <Td>
@@ -107,7 +107,7 @@ export default function CustomersPage() {
                           {o.orderNumber}
                         </Link>
                       </Td>
-                      <Td>{f.date(o.placedAt)}</Td>
+                      <Td className="tabular">{f.date(o.placedAt)}</Td>
                       <Td className="tabular">{f.money(o.total, cur)}</Td>
                       <Td>
                         <StatusBadge status={o.status} />

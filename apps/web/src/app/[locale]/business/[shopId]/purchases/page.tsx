@@ -130,7 +130,7 @@ export default function PurchasesPage() {
             {purchases.data.items.map((p) => (
               <tr key={p.id}>
                 <Td className="font-medium">{p.purchaseNumber}</Td>
-                <Td>{f.date(p.purchaseDate)}</Td>
+                <Td className="tabular">{f.date(p.purchaseDate)}</Td>
                 <Td>{p.supplier.name}</Td>
                 <Td>
                   <div className="flex gap-1">

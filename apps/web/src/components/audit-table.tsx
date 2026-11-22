@@ -44,7 +44,7 @@ export function AuditTable({ basePath, showShop }: { basePath: string; showShop?
           <Table head={[t('when'), t('actor'), ...(showShop ? [t('shop')] : []), t('action'), t('target'), t('reason')]} empty={!logs.data.items.length}>
             {logs.data.items.map((l) => (
               <tr key={l.id} className="cursor-pointer hover:bg-surface-2" onClick={() => setOpen(l)}>
-                <Td className="whitespace-nowrap text-xs">{f.date(l.createdAt, true)}</Td>
+                <Td className="tabular whitespace-nowrap text-xs">{f.date(l.createdAt, true)}</Td>
                 <Td>{l.actor?.fullName ?? l.admin?.fullName ?? t('system')}</Td>
                 {showShop && <Td>{l.shop?.name ?? '—'}</Td>}
                 <Td>

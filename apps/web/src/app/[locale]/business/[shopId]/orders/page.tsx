@@ -64,7 +64,7 @@ export default function OrdersInbox() {
                     {o.orderNumber}
                   </Link>
                 </Td>
-                <Td>{f.date(o.placedAt, true)}</Td>
+                <Td className="tabular">{f.date(o.placedAt, true)}</Td>
                 <Td>
                   {o.recipientName}
                   <span className="block text-xs text-muted">{o.recipientPhone}</span>

@@ -38,7 +38,7 @@ function Orders() {
             </Link>
           </Td>
           <Td>{o.storefront.displayName}</Td>
-          <Td>{f.date(o.placedAt)}</Td>
+          <Td className="tabular">{f.date(o.placedAt)}</Td>
           <Td>
             <StatusBadge status={o.status} />
           </Td>

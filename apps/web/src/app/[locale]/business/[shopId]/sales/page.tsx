@@ -77,7 +77,7 @@ export default function SalesPage() {
                     {s.invoiceNumber}
                   </Link>
                 </Td>
-                <Td>{f.date(s.soldAt, true)}</Td>
+                <Td className="tabular">{f.date(s.soldAt, true)}</Td>
                 <Td>{s.customer?.name ?? '—'}</Td>
                 <Td>{s.cashier.fullName}</Td>
                 <Td>

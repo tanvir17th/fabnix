@@ -180,7 +180,7 @@ export default function InventoryPage() {
           <Table head={[t('when'), t('type'), t('changeOnHand'), t('changeReserved'), t('balance'), t('reason')]} empty={!ledger.data.items.length}>
             {ledger.data.items.map((m) => (
               <tr key={m.id}>
-                <Td className="whitespace-nowrap text-xs">{f.date(m.createdAt, true)}</Td>
+                <Td className="tabular whitespace-nowrap text-xs">{f.date(m.createdAt, true)}</Td>
                 <Td>{tm(m.type)}</Td>
                 <Td className={`tabular ${Number(m.deltaOnHandInches) < 0 ? 'text-danger' : 'text-success'}`}>{Number(m.deltaOnHandInches) ? `${f.number(m.deltaOnHandInches, 2)}″` : ''}</Td>
                 <Td className="tabular text-muted">{Number(m.deltaReservedInches) ? `${f.number(m.deltaReservedInches, 2)}″` : ''}</Td>
