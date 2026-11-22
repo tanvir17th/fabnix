@@ -124,4 +124,16 @@ describe('stock table: total fabric, on hand, stock value, total profit', () => 
     await owner().patch(`/shops/${f.shopId}/products/${lilan.id}`, { purchaseRate: '110' });
     expect((await row(lilan.id)).totalPurchaseValue).toBe('88000.00'); // follows purchase-price edits
   });
+
+  it('selling at exactly cost never crashes the list on a tiny rounding residual (3.2e-8) and shows 0.00', async () => {
+    // ৳70 / 36 in and ৳100 / 36 in round at 10 dp, leaving a tiny positive or negative residual per yard.
+    for (const [name, rate] of [['Residual Plus', '70'], ['Residual Minus', '100']] as const) {
+      const p = await product(t, f, { name, sku: uniq('RES'), sellingRate: rate, purchaseRate: rate });
+      await openingStock(t, f, p.id, '100 yd');
+      await sell(p.id, '16 yd', String(Number(rate) * 16));
+      const r = await owner().get(`/shops/${f.shopId}/inventory?limit=100`);
+      expect(r.status).toBe(200);
+      expect(r.body.items.find((i: { product: { id: string } }) => i.product.id === p.id)).toMatchObject({ soldInches: yd(16), totalProfit: '0.00' });
+    }
+  });
 });

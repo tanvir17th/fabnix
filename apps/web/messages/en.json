@@ -20,7 +20,8 @@
     "save": "Save",
     "saved": "Saved.",
     "uploading": "Uploading…",
-    "footer": "FABNIX · EST. 2026"
+    "footer": "FABNIX · EST. 2026",
+    "retry": "Retry"
   },
   "nav": {
     "admin": "Admin console",

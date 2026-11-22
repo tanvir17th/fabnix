@@ -98,9 +98,18 @@ export default function InventoryPage() {
         <Input type="search" placeholder={t('search')} aria-label={t('search')} value={q} onChange={(e) => setQ(e.target.value)} className="w-72" />
         <Checkbox label={t('lowOnly')} checked={lowOnly} onChange={setLowOnly} />
       </div>
-      <ErrorNote error={list.error} />
+      {list.error && (
+        <div className="mb-4 flex flex-col gap-2">
+          <ErrorNote error={list.error} />
+          <div>
+            <Button size="sm" variant="secondary" pending={list.loading} onClick={() => void list.reload()}>
+              {tc('retry')}
+            </Button>
+          </div>
+        </div>
+      )}
       {!list.data ? (
-        <Loading />
+        list.error ? null : <Loading />
       ) : (
         <Table head={[t('product'), t('branch'), t('totalFabric'), t('onHand'), t('purchasePrice'), t('sellingPrice'), t('valuation'), t('totalPurchaseValue'), t('totalProfit'), '']} empty={!list.data.items.length}>
           {list.data.items.map((r) => (

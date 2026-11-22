@@ -108,14 +108,14 @@ export class InventoryService {
 
   /** Σ fabric added per branch × product from the append-only ledger. */
   private async receivedTotals(shopId: string, productIds: string[]): Promise<Map<string, string>> {
-    const rows = await this.prisma.$queryRaw<Array<{ branchId: string; productId: string; inches: unknown }>>`
+    const rows = await this.prisma.$queryRaw<Array<{ branchId: string; productId: string; inches: string }>>`
       SELECT "branchId", "productId",
              coalesce(sum(CASE WHEN type::text = ANY(${[...RECEIVED_IN]}::text[]) THEN "deltaOnHandInches"
-                               WHEN type = 'PURCHASE_CANCEL_OUT' THEN "deltaOnHandInches" ELSE 0 END), 0) AS inches
+                               WHEN type = 'PURCHASE_CANCEL_OUT' THEN "deltaOnHandInches" ELSE 0 END), 0)::text AS inches
       FROM stock_movements
       WHERE "shopId" = ${shopId}::uuid AND "productId" = ANY(${productIds}::uuid[])
       GROUP BY "branchId", "productId"`;
-    return new Map(rows.map((r) => [`${r.branchId}:${r.productId}`, String(r.inches)]));
+    return new Map(rows.map((r) => [`${r.branchId}:${r.productId}`, r.inches]));
   }
 
   /**
@@ -125,7 +125,7 @@ export class InventoryService {
    * Cost = sold inches × (recorded cost per inch, else current purchase price ÷ inches per price unit).
    */
   private async soldTotals(shopId: string, productIds: string[]): Promise<Map<string, { inches: string; profit: string; uncosted: number }>> {
-    const rows = await this.prisma.$queryRaw<Array<{ branchId: string; productId: string; inches: unknown; profit: unknown; uncosted: bigint }>>`
+    const rows = await this.prisma.$queryRaw<Array<{ branchId: string; productId: string; inches: string; profit: string; uncosted: bigint }>>`
       WITH lines AS (
         SELECT sa."branchId", si."productId", si."totalLengthInches" - si."returnedInches" AS inches,
                (si."lineTotal" - si."taxAmount") * (si."totalLengthInches" - si."returnedInches") / nullif(si."totalLengthInches", 0) AS amount,
@@ -146,11 +146,12 @@ export class InventoryService {
         JOIN products p ON p.id = l."productId"
         LEFT JOIN measurement_units mu ON mu."shopId" = p."shopId" AND mu.code = p."priceUnitCode" AND mu."isActive"
       )
-      SELECT "branchId", "productId", sum(inches) AS inches,
-             coalesce(sum(coalesce(amount, 0) - inches * coalesce(cost, 0)), 0) AS profit,
+      -- ::text keeps plain notation: a tiny residual would otherwise reach JS as "3.2e-8", which D() rejects.
+      SELECT "branchId", "productId", coalesce(sum(inches), 0)::text AS inches,
+             coalesce(sum(coalesce(amount, 0) - inches * coalesce(cost, 0)), 0)::text AS profit,
              count(*) FILTER (WHERE cost IS NULL) AS uncosted
       FROM priced GROUP BY "branchId", "productId"`;
-    return new Map(rows.map((r) => [`${r.branchId}:${r.productId}`, { inches: String(r.inches), profit: String(r.profit), uncosted: Number(r.uncosted) }]));
+    return new Map(rows.map((r) => [`${r.branchId}:${r.productId}`, { inches: r.inches, profit: r.profit, uncosted: Number(r.uncosted) }]));
   }
 
   async ledger(ctx: ShopContext, productId: string, q: { branchId?: string; cursor?: string; limit: number }) {
