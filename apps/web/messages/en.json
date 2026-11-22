@@ -347,7 +347,12 @@
     "payFull": "Paid in full",
     "due": "Due: {amount}",
     "overpaid": "Payment exceeds the total.",
-    "complete": "Complete sale"
+    "complete": "Complete sale",
+    "sellOnDue": "Due",
+    "sellOnDueHint": "Leave the unpaid balance as customer due",
+    "selectCustomer": "Select customer",
+    "dueCustomerHint": "Search or add the customer for this due sale.",
+    "dueToCustomer": "{amount} will be added to {name}’s due balance."
   },
   "sales": {
     "title": "Sales history",

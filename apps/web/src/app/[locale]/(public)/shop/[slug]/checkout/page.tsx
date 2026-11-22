@@ -10,12 +10,14 @@ import { Link, useRouter } from '@/i18n/navigation';
 import { newIdempotencyKey } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useFormat } from '@/lib/format';
+import { usePaymentMethodLabel } from '@/lib/payment-label';
 import { useAction, useApi } from '@/lib/hooks';
 import type { StoreProfile } from '../page';
 import type { CartView } from '../cart/page';
 
 /** Checkout (FR-102…FR-106): review exact totals, then submit idempotently. */
 function Checkout({ slug }: { slug: string }) {
+  const methodLabel = usePaymentMethodLabel();
   const t = useTranslations('checkout');
   const f = useFormat();
   const mtext = useMeasurementText();
@@ -113,7 +115,7 @@ function Checkout({ slug }: { slug: string }) {
               <label key={m.id} className="flex cursor-pointer items-start gap-2 rounded-md border border-line p-3 has-[:checked]:border-accent">
                 <input type="radio" name="method" checked={method?.id === m.id} onChange={() => setMethodId(m.id)} className="mt-1 accent-[var(--accent-ink)]" />
                 <span>
-                  <span className="font-medium">{m.label}</span>
+                  <span className="font-medium">{methodLabel(m)}</span>
                   {m.instructions && <span className="block text-xs text-muted">{m.instructions}</span>}
                 </span>
               </label>

@@ -6,6 +6,7 @@ import { useShop } from '@/components/shop-context';
 import { Button, ErrorNote, Field, Input, Loading, Modal, PageHeader, ReasonDialog, Select, StatusBadge, Stat, Td, Table } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { useFormat } from '@/lib/format';
+import { usePaymentMethodLabel } from '@/lib/payment-label';
 import { useAction, useApi } from '@/lib/hooks';
 
 interface Category {
@@ -28,6 +29,7 @@ const monthStart = () => `${localToday().slice(0, 8)}01`;
 
 /** FR-058/059/062 expenses: record, filter by date, void (never delete). */
 export default function ExpensesPage() {
+  const methodLabel = usePaymentMethodLabel();
   const t = useTranslations('expenses');
   const tk = useTranslations();
   const tc = useTranslations('common');
@@ -37,7 +39,7 @@ export default function ExpensesPage() {
   const [from, setFrom] = useState(monthStart);
   const [to, setTo] = useState(localToday);
   const categories = useApi<Category[]>(`/shops/${shopId}/expense-categories`);
-  const methods = useApi<Array<{ id: string; label: string; isActive: boolean }>>(`/shops/${shopId}/payment-methods`);
+  const methods = useApi<Array<{ id: string; type: string; label: string; isActive: boolean }>>(`/shops/${shopId}/payment-methods`);
   const list = useApi<{ items: Expense[]; total: string }>(`/shops/${shopId}/expenses?limit=100&from=${from}&to=${to}`);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ categoryId: '', amount: '', expenseDate: localToday(), paymentMethodId: '', note: '' });
@@ -126,7 +128,7 @@ export default function ExpensesPage() {
                 <option value="">—</option>
                 {methods.data?.filter((m) => m.isActive).map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.label}
+                    {methodLabel(m)}
                   </option>
                 ))}
               </Select>

@@ -9,9 +9,11 @@ import { Button, Card, ErrorNote, Field, Input, Loading, Modal, PageHeader, Reas
 import { newIdempotencyKey } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useAction, useApi } from '@/lib/hooks';
+import { usePaymentMethodLabel } from '@/lib/payment-label';
 
 /** Invoice view/print (FR-047/048), due collection (FR-052) and cancellation (AC-009). */
 export default function SaleDetailPage({ params }: { params: Promise<{ saleId: string }> }) {
+  const methodLabel = usePaymentMethodLabel();
   const { saleId } = use(params);
   const t = useTranslations('sales');
   const tc = useTranslations('common');
@@ -19,7 +21,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ saleId: s
   const { call } = useAuth();
   const [lang, setLang] = useState<'bn' | 'en' | null>(null);
   const invoice = useApi<InvoiceData>(`/shops/${shopId}/sales/${saleId}/invoice`);
-  const methods = useApi<Array<{ id: string; label: string; isActive: boolean; availableInPos: boolean }>>(`/shops/${shopId}/payment-methods`);
+  const methods = useApi<Array<{ id: string; type: string; label: string; isActive: boolean; availableInPos: boolean }>>(`/shops/${shopId}/payment-methods`);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [payment, setPayment] = useState({ methodId: '', amount: '', reference: '' });
@@ -109,7 +111,7 @@ export default function SaleDetailPage({ params }: { params: Promise<{ saleId: s
                 <Select id={id} value={payment.methodId} onChange={(e) => setPayment((p) => ({ ...p, methodId: e.target.value }))}>
                   {methods.data?.filter((m) => m.isActive && m.availableInPos).map((m) => (
                     <option key={m.id} value={m.id}>
-                      {m.label}
+                      {methodLabel(m)}
                     </option>
                   ))}
                 </Select>

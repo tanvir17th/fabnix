@@ -8,6 +8,7 @@ import { Button, Card, ErrorNote, Field, Input, Loading, Modal, PageHeader, Reas
 import { newIdempotencyKey } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useFormat } from '@/lib/format';
+import { usePaymentMethodLabel } from '@/lib/payment-label';
 import { useAction, useApi } from '@/lib/hooks';
 import { useMeasurementText, useUnitLabel } from '@/components/measurement';
 
@@ -49,6 +50,7 @@ interface ShopOrder {
 
 /** FR-110…FR-116: review, confirm/reject, fulfil, notes, COD/manual payment. */
 export default function ShopOrderPage({ params }: { params: Promise<{ orderId: string }> }) {
+  const methodLabel = usePaymentMethodLabel();
   const { orderId } = use(params);
   const t = useTranslations('orders');
   const ts = useTranslations('status');
@@ -59,7 +61,7 @@ export default function ShopOrderPage({ params }: { params: Promise<{ orderId: s
   const { shopId, can } = useShop();
   const { call } = useAuth();
   const order = useApi<ShopOrder>(`/shops/${shopId}/orders/${orderId}`);
-  const methods = useApi<Array<{ id: string; label: string; isActive: boolean }>>(`/shops/${shopId}/payment-methods`);
+  const methods = useApi<Array<{ id: string; type: string; label: string; isActive: boolean }>>(`/shops/${shopId}/payment-methods`);
   const [dialog, setDialog] = useState<null | 'reject' | 'cancel'>(null);
   const [statusOpen, setStatusOpen] = useState<OrderStatus | null>(null);
   const [tracking, setTracking] = useState({ provider: '', trackingReference: '', note: '' });
@@ -308,7 +310,7 @@ export default function ShopOrderPage({ params }: { params: Promise<{ orderId: s
               <Select id={id} value={pay.methodId} onChange={(e) => setPay((p) => ({ ...p, methodId: e.target.value }))}>
                 {methods.data?.filter((m) => m.isActive).map((m) => (
                   <option key={m.id} value={m.id}>
-                    {m.label}
+                    {methodLabel(m)}
                   </option>
                 ))}
               </Select>

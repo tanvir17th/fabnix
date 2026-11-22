@@ -8,6 +8,7 @@ import { useShop } from '@/components/shop-context';
 import { Button, Card, Checkbox, ErrorNote, Field, Input, Loading, Notice, PageHeader, Select, Tabs, Td, Table } from '@/components/ui';
 import { useAuth } from '@/lib/auth';
 import { useFormat } from '@/lib/format';
+import { usePaymentMethodLabel } from '@/lib/payment-label';
 import { useAction, useApi } from '@/lib/hooks';
 
 interface Unit {
@@ -257,6 +258,7 @@ function PaymentsTab() {
   const tp = useTranslations('paymentType');
   const { shopId } = useShop();
   const { call } = useAuth();
+  const methodLabel = usePaymentMethodLabel();
   const methods = useApi<Array<{ id: string; type: string; label: string; instructions: string | null; accountRef: string | null; availableInPos: boolean; availableOnline: boolean; isActive: boolean }>>(`/shops/${shopId}/payment-methods`);
   const [form, setForm] = useState({ type: 'BKASH', label: '', accountRef: '', instructions: '', availableInPos: true, availableOnline: true });
   const add = useAction(async () => {
@@ -274,7 +276,7 @@ function PaymentsTab() {
         {methods.data?.map((m) => (
           <tr key={m.id}>
             <Td>
-              {m.label}
+              {methodLabel(m)}
               {m.accountRef && <span className="block text-xs text-muted">{m.accountRef}</span>}
             </Td>
             <Td>{tp.has(m.type) ? tp(m.type) : m.type}</Td>

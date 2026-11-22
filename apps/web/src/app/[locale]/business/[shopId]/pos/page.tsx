@@ -1,7 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { D, DomainError, MeasurementComponent, calculateInvoice, sum } from '@fabnix/shared';
 import { LengthSummary, MeasurementInput, UnitOption, evaluate, useUnitLabel } from '@/components/measurement';
 import { useShop } from '@/components/shop-context';
@@ -11,6 +11,7 @@ import { ApiError, Page, newIdempotencyKey } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useFormat } from '@/lib/format';
 import { useAction, useApi, useDebounced } from '@/lib/hooks';
+import { usePaymentMethodLabel } from '@/lib/payment-label';
 
 interface Product {
   id: string;
@@ -58,6 +59,7 @@ export default function PosPage() {
   const tErr = useTranslations('errors');
   const f = useFormat();
   const unitLabel = useUnitLabel();
+  const methodLabel = usePaymentMethodLabel();
   const { shopId, access, base, can } = useShop();
   const { call } = useAuth();
   const currency = access.shop.currency;
@@ -77,6 +79,8 @@ export default function PosPage() {
   const dcq = useDebounced(custQ, 250);
   const customers = useApi<Page<Customer>>(dcq.length >= 2 && !customer ? `/shops/${shopId}/customers?limit=6&q=${encodeURIComponent(dcq)}` : null);
   const [payments, setPayments] = useState<Array<{ methodId: string; amount: string; reference: string }>>([]);
+  const [dueMode, setDueMode] = useState(false);
+  const customerInput = useRef<HTMLInputElement>(null);
   const [invoiceLanguage, setInvoiceLanguage] = useState<'bn' | 'en'>(access.pos.defaultInvoiceLanguage);
   const [idemKey, setIdemKey] = useState(newIdempotencyKey);
   const [done, setDone] = useState<{ id: string; invoiceNumber: string; grandTotal: string; dueAmount: string } | null>(null);
@@ -117,6 +121,24 @@ export default function PosPage() {
   const grand = preview.invoice?.grandTotal ?? '0.00';
   const paid = sum(payments.map((p) => (p.amount && /^\d+(\.\d{1,2})?$/.test(p.amount) ? p.amount : '0')));
   const due = D(grand).minus(paid);
+  const hasDue = due.greaterThan(0) && lines.length > 0;
+  // Mirrors the shop's payment settings; the server enforces them too.
+  const dueBlocked = hasDue && (D(paid).isZero() ? !access.pos.allowDueSales : !access.pos.allowPartialPayment);
+  const canMarkDue = lines.length > 0 && D(grand).greaterThan(0) && (D(paid).greaterThan(0) && due.greaterThan(0) ? access.pos.allowPartialPayment : access.pos.allowDueSales);
+  const dueActive = dueMode && hasDue;
+  const needsCustomer = hasDue && !customer && !dueBlocked && (dueMode || D(paid).greaterThan(0));
+
+  const focusCustomer = () => {
+    const el = customerInput.current;
+    el?.focus();
+    el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  };
+  /** Keeps money already entered and leaves the rest as due; a fully paid draft becomes a full-due sale. */
+  const sellOnDue = () => {
+    setPayments((ps) => (due.greaterThan(0) ? ps.filter((p) => p.amount && Number(p.amount) > 0) : []));
+    setDueMode(true);
+    if (!customer) focusCustomer();
+  };
 
   const addProduct = (p: Product) => {
     setLines((ls) => [...ls, { key: newIdempotencyKey(), product: p, components: [], pieces: 1, discountType: 'NONE', discountValue: '', overrideRate: '', overrideReason: '' }]);
@@ -147,6 +169,7 @@ export default function PosPage() {
     setDone(sale);
     setLines([]);
     setPayments([]);
+    setDueMode(false);
     setCustomer(null);
     setInvoiceDiscount('');
     setIdemKey(newIdempotencyKey());
@@ -303,6 +326,7 @@ export default function PosPage() {
         </div>
 
         <div className="flex flex-col gap-4 xl:sticky xl:top-20 xl:h-fit">
+          <div className={needsCustomer ? 'rounded-lg ring-2 ring-warning ring-offset-2 ring-offset-bg' : undefined}>
           <Card title={t('customer')}>
             {customer ? (
               <div className="flex items-center justify-between">
@@ -318,7 +342,7 @@ export default function PosPage() {
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                <Input placeholder={t('customerSearch')} aria-label={t('customerSearch')} value={custQ} onChange={(e) => setCustQ(e.target.value)} />
+                <Input ref={customerInput} placeholder={t('customerSearch')} aria-label={t('customerSearch')} value={custQ} onChange={(e) => setCustQ(e.target.value)} />
                 {customers.data?.items.map((c) => (
                   <button key={c.id} type="button" className="rounded-md border border-line px-3 py-1.5 text-left text-sm hover:border-accent" onClick={() => setCustomer(c)}>
                     {c.name} <span className="text-xs text-muted">{c.phone}</span>
@@ -330,10 +354,11 @@ export default function PosPage() {
                   </Button>
                 )}
                 <ErrorNote error={addCustomer.error} />
-                <p className="text-xs text-muted">{t('walkInHint')}</p>
+                <p className={`text-xs ${needsCustomer ? 'font-medium text-warning' : 'text-muted'}`}>{needsCustomer ? t('dueCustomerHint') : t('walkInHint')}</p>
               </div>
             )}
           </Card>
+          </div>
 
           <Card title={t('payment')}>
             <dl className="flex flex-col gap-1 text-sm">
@@ -382,7 +407,7 @@ export default function PosPage() {
                   <Select aria-label={t('method')} value={p.methodId} onChange={(e) => setPayments((ps) => ps.map((x, j) => (j === i ? { ...x, methodId: e.target.value } : x)))} className="w-36">
                     {posMethods.map((m) => (
                       <option key={m.id} value={m.id}>
-                        {m.label}
+                        {methodLabel(m)}
                       </option>
                     ))}
                   </Select>
@@ -392,18 +417,36 @@ export default function PosPage() {
                   </Button>
                 </div>
               ))}
-              <div className="flex gap-2">
-                <Button size="sm" variant="secondary" disabled={!posMethods.length} onClick={() => setPayments((ps) => [...ps, { methodId: posMethods[0]!.id, amount: due.greaterThan(0) ? due.toFixed(2) : '', reference: '' }])}>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" disabled={!posMethods.length} onClick={() => {
+                    setDueMode(false);
+                    setPayments((ps) => [...ps, { methodId: posMethods[0]!.id, amount: due.greaterThan(0) ? due.toFixed(2) : '', reference: '' }]);
+                  }}>
                   + {t('addPayment')}
                 </Button>
-                <Button size="sm" variant="secondary" disabled={!posMethods.length || !preview.invoice} onClick={() => setPayments([{ methodId: posMethods[0]!.id, amount: grand, reference: '' }])}>
+                <Button size="sm" variant="secondary" disabled={!posMethods.length || !preview.invoice} onClick={() => {
+                    setDueMode(false);
+                    setPayments([{ methodId: posMethods[0]!.id, amount: grand, reference: '' }]);
+                  }}>
                   {t('payFull')}
+                </Button>
+                <Button size="sm" variant={dueActive ? 'accent' : 'secondary'} aria-pressed={dueActive} disabled={!canMarkDue} title={t('sellOnDueHint')} onClick={sellOnDue}>
+                  {t('sellOnDue')}
                 </Button>
               </div>
               <p className={`text-sm tabular ${due.greaterThan(0) ? 'text-warning' : 'text-muted'}`}>
                 {due.isNegative() ? t('overpaid') : t('due', { amount: f.money(due.toFixed(2), currency) })}
               </p>
-              {due.greaterThan(0) && !customer && lines.length > 0 && <p className="text-xs text-danger">{tErr('DUE_REQUIRES_CUSTOMER')}</p>}
+              {dueBlocked && <p className="text-xs text-danger">{tErr('PARTIAL_PAYMENT_NOT_ALLOWED')}</p>}
+              {hasDue && !dueBlocked && !customer && (
+                <p className="text-xs text-danger">
+                  {tErr('DUE_REQUIRES_CUSTOMER')}{' '}
+                  <button type="button" className="font-medium underline" onClick={focusCustomer}>
+                    {t('selectCustomer')}
+                  </button>
+                </p>
+              )}
+              {hasDue && !dueBlocked && customer && <p className="text-xs text-muted">{t('dueToCustomer', { amount: f.money(due.toFixed(2), currency), name: customer.name })}</p>}
             </div>
 
             <ErrorNote error={submit.error} className="mt-3" />
@@ -412,7 +455,7 @@ export default function PosPage() {
               variant="accent"
               className="mt-4 w-full"
               pending={submit.pending}
-              disabled={!lines.length || invalidLines || !!preview.error || due.isNegative() || overrideMissingReason || (due.greaterThan(0) && !customer)}
+              disabled={!lines.length || invalidLines || !!preview.error || due.isNegative() || overrideMissingReason || dueBlocked || (due.greaterThan(0) && !customer)}
               onClick={() => void submit.run()}
             >
               {t('complete')}
